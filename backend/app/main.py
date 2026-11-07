@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field, model_validator
 from workers.render.media import probe, sha256
 from workers.video.pipeline import process_video
 from workers.video.runtime import available_devices, select_device
+from backend.app.highlight_routes import router as highlight_router, public_highlights
 from workers.video.sports.basketball import OUTDOOR_SAMPLE_COURT
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -121,6 +122,53 @@ def artifact(path, kind, game):
     return dict(artifact_id=id, kind=kind, uri="/api/media/" + id, sha256=digest)
 
 
+def output_emitter(game_id, id, attempt):
+    game = get("game", game_id)
+
+    def emit(kind, payload):
+        if kind == "phase":
+            set_job(id, phase=payload["phase"])
+        elif kind == "tracks.batch":
+            # Timestamp-keyed batches replace retries; reconnect stream retains attempt history.
+            payload["attempt"] = attempt
+            put(
+                "batch",
+                id + ":" + str(payload["source_frame"]),
+                dict(job_id=id, game_id=game_id, **payload),
+            )
+            update(game_id, id, kind, payload)
+        elif kind == "clip.updated":
+            payload["attempt"] = attempt
+            path = payload.pop("path")
+            registered = artifact(path, "clip", game_id)
+            payload.update(uri=registered["uri"])
+            put("clip", payload["clip_id"], dict(job_id=id, **payload))
+            current = get("job", id)
+            current["artifacts"].append(registered)
+            put("job", id, current)
+            update(game_id, id, kind, payload)
+        elif kind == "event.created":
+            payload["attempt"] = attempt
+            clip = next(
+                (
+                    c
+                    for c in reversed(all_records("clip"))
+                    if c["event_id"] == payload["event_id"]
+                ),
+                None,
+            )
+            payload["clip_uri"] = clip["uri"] if clip else None
+            payload["evidence_uri"] = game["source_uri"]
+            put("event", payload["event_id"], dict(job_id=id, **payload))
+            update(game_id, id, kind, payload)
+
+        elif kind == "highlights.updated":
+            put("highlights", id, payload)
+            update(game_id, id, kind, public_highlights(payload))
+
+    return emit
+
+
 def run_job(id):
     job = get("job", id)
     game = get("game", job["game_id"])
@@ -129,48 +177,13 @@ def run_job(id):
         set_job(id, status="running", attempts=attempt, error=None, phase="track")
         audit(game_id, id, "analysis_started", "running", attempt)
 
-        def emit(kind, payload):
-            if kind == "phase":
-                set_job(id, phase=payload["phase"])
-            elif kind == "tracks.batch":
-                # Timestamp-keyed batches replace retries; reconnect stream retains attempt history.
-                payload["attempt"] = attempt
-                put(
-                    "batch",
-                    id + ":" + str(payload["source_frame"]),
-                    dict(job_id=id, game_id=game_id, **payload),
-                )
-                update(game_id, id, kind, payload)
-            elif kind == "clip.updated":
-                payload["attempt"] = attempt
-                path = payload.pop("path")
-                registered = artifact(path, "clip", game_id)
-                payload.update(uri=registered["uri"])
-                put("clip", payload["clip_id"], dict(job_id=id, **payload))
-                current = get("job", id)
-                current["artifacts"].append(registered)
-                put("job", id, current)
-                update(game_id, id, kind, payload)
-            elif kind == "event.created":
-                payload["attempt"] = attempt
-                clip = next(
-                    (
-                        c
-                        for c in all_records("clip")
-                        if c["event_id"] == payload["event_id"]
-                    ),
-                    None,
-                )
-                payload["clip_uri"] = clip["uri"] if clip else None
-                payload["evidence_uri"] = game["source_uri"]
-                put("event", payload["event_id"], dict(job_id=id, **payload))
-                update(game_id, id, kind, payload)
+        emit = output_emitter(game_id, id, attempt)
 
         try:
             # Each retry replaces this job's materialized output; the append-only audit retains history.
             with connect() as db:
                 for row in db.execute(
-                    "SELECT kind,id,value FROM records WHERE kind IN ('batch','clip','event')"
+                    "SELECT kind,id,value FROM records WHERE kind IN ('batch','clip','event','highlights')"
                 ).fetchall():
                     if json.loads(row["value"]).get("job_id") == id:
                         db.execute(
@@ -193,6 +206,14 @@ def run_job(id):
             audit(game_id, id, "analysis_completed", "succeeded", attempt)
             return
         except Exception as exc:
+            for bundle in all_records("highlights"):
+                if bundle["job_id"] == id and bundle["status"] in ("queued", "running"):
+                    bundle.update(
+                        status="failed",
+                        error="Analysis failed during highlight generation",
+                    )
+                    put("highlights", id, bundle)
+                    update(game_id, id, "highlights.updated", public_highlights(bundle))
             retryable = isinstance(exc, (OSError, subprocess.TimeoutExpired))
             audit(game_id, id, "analysis_error", type(exc).__name__, attempt)
             if retryable and attempt < 3:
@@ -223,6 +244,13 @@ async def lifespan(app):
                 status="failed",
                 error="Server restarted; submit analysis again with a new request key",
             )
+    for bundle in all_records("highlights"):
+        if bundle["status"] in ("queued", "running"):
+            bundle.update(
+                status="failed",
+                error="Server restarted during highlight generation; generate again",
+            )
+            put("highlights", bundle["job_id"], bundle)
     yield
 
 
@@ -380,6 +408,14 @@ def analyze(
                         409, "Request key was already used with different options"
                     )
                 return public_job(get("job", row["job_id"]))
+            if any(
+                b.get("job_id") == latest_job_id(game_id)
+                and b["status"] in ("queued", "running")
+                for b in all_records("highlights")
+            ):
+                raise HTTPException(
+                    409, "Wait for highlight generation before re-analysis"
+                )
             # One active job per game prevents mixed tracking timelines.
             if any(
                 j["game_id"] == game_id and j["status"] in ("queued", "running")
@@ -438,14 +474,41 @@ def tracks(game_id: str, after_ms: int = -1):
 def events(game_id: str):
     get("game", game_id)
     id = latest_job_id(game_id)
-    return {"items": [c for c in all_records("event") if c["job_id"] == id]}
+    visible_clips = {c["event_id"] for c in clips(game_id)["items"]}
+    return {
+        "items": [
+            c
+            for c in all_records("event")
+            if c["job_id"] == id
+            and (
+                c.get("origin") not in ("visual_heuristic", "reviewer_confirmed")
+                or c["event_id"] in visible_clips
+            )
+        ]
+    }
 
 
 @app.get("/api/games/{game_id}/clips")
 def clips(game_id: str):
     get("game", game_id)
     id = latest_job_id(game_id)
-    return {"items": [c for c in all_records("clip") if c["job_id"] == id]}
+    result = [c for c in all_records("clip") if c["job_id"] == id]
+    manifests = [b for b in all_records("highlights") if b["job_id"] == id]
+    if manifests:
+        active = manifests[-1]
+        visible = (
+            {
+                c["clip_id"]
+                for c in active["candidates"]
+                if c.get("clip_uri") and c["review_status"] != "rejected"
+            }
+            if active["status"] == "succeeded"
+            else set()
+        )
+        result = [
+            c for c in result if c.get("kind") != "highlight" or c["clip_id"] in visible
+        ]
+    return {"items": result}
 
 
 @app.get("/api/jobs/{id}/audit")
@@ -505,6 +568,9 @@ def media(id: str):
 def profiles():
     # No dataset track is silently converted to an athlete identity.
     return {"items": []}
+
+
+app.include_router(highlight_router)
 
 
 if (ROOT / "frontend/dist").exists():

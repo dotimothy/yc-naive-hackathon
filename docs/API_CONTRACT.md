@@ -8,6 +8,10 @@ The local API implements the video/job/track/clip subset plus game listing, samp
 
 Current deviations from the initial proposal: pose points expose `visibility` rather than an invented calibrated confidence; default segment origin is `review_window` and events remain unverified. SSE adds `server_timestamp_ms` for transport-delay measurement. Transient retries restart the whole job (max three executions) rather than resuming a phase; interrupted jobs fail explicitly on API restart. API validation errors use FastAPI’s `detail` shape. These limits must remain visible until their implementations change.
 
+## Highlights extension
+
+[HIGHLIGHTS_CONTRACT.md](HIGHLIGHTS_CONTRACT.md) defines per-analysis candidates, private track groups, review, scoring and generation endpoints. Automatic candidate origin is `visual_heuristic`; reviewed outcomes use `reviewer_confirmed`. Default analysis now generates selected highlights; fixed `review_window` clips remain a fallback when no candidate qualifies. `highlights.updated` SSE carries the current public bundle. These scores are highlight priority, not athlete merit or official statistics.
+
 ## Sport context
 
 Each game includes `sport`; multipart upload accepts `sport`, defaulting to `basketball`. Stage 1 supports only `basketball` and rejects unsupported values explicitly. Pass sport through worker options and resolve sport-specific event vocabulary/court configuration there. Shared tracking and clip records remain sport-neutral; event types are interpreted in the parent game’s sport context. Other sports are planned, not implemented.

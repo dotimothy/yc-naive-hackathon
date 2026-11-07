@@ -1,6 +1,7 @@
 """Source-preserving clip rendering and independent media checks."""
 
 import hashlib
+import math
 import cv2
 import numpy as np
 import json
@@ -57,13 +58,33 @@ def probe(path):
     )
 
 
-def render_clip(source_path, start_ms, end_ms, output_path):
+def render_clip(source_path, start_ms, end_ms, output_path, overlays=None):
     metadata = probe(source_path)
     if not 0 <= start_ms < end_ms <= metadata["duration_ms"]:
         raise ValueError("Clip range falls outside source")
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = output_path.with_name(output_path.stem + ".tmp.mp4")
+    filters = []
+    for overlay in (overlays or [])[:100]:
+        values = list(overlay["bbox"])
+        if len(values) != 4 or not all(math.isfinite(v) for v in values):
+            raise ValueError("Invalid spotlight coordinates")
+        x, y, w, h = values
+        if w <= 0 or h <= 0:
+            raise ValueError("Invalid spotlight dimensions")
+        x = max(0, min(metadata["width"] - 1, round(x * metadata["width"])))
+        y = max(0, min(metadata["height"] - 1, round(y * metadata["height"])))
+        w = max(1, min(metadata["width"] - x, round(w * metadata["width"])))
+        h = max(1, min(metadata["height"] - y, round(h * metadata["height"])))
+        a = max(0, (overlay["timestamp_ms"] - start_ms) / 1000)
+        b = min((end_ms - start_ms) / 1000, (overlay["end_ms"] - start_ms) / 1000)
+        if b > a:
+            filters.append(
+                "drawbox=x=%d:y=%d:w=%d:h=%d:color=yellow@0.95:t=3:enable='gte(t,%.6f)*lt(t,%.6f)'"
+                % (x, y, w, h, a, b)
+            )
+    video_filter = ["-vf", ",".join(filters)] if filters else []
     subprocess.run(
         [
             "ffmpeg",
@@ -77,6 +98,7 @@ def render_clip(source_path, start_ms, end_ms, output_path):
             str(source_path),
             "-t",
             str((end_ms - start_ms) / 1000),
+            *video_filter,
             "-map",
             "0:v:0",
             "-map",

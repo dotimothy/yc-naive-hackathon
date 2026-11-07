@@ -77,7 +77,17 @@ export type Clip = {
   expected_duration_ms?: number;
   tolerance_ms?: number;
   decoded?: boolean;
+  /** 'highlight' for rendered highlight picks; absent/other for review windows. */
+  kind?: string;
+  track_id?: string | null;
+  /** Highlight priority score 0–100 (visual heuristic + reviewer weights). Not a talent rating. */
+  highlight_score?: number | null;
+  candidate_id?: string | null;
+  review_status?: HighlightReviewStatus | null;
 };
+
+/** Known origins; backend may add more, so string stays allowed. */
+export type EventOrigin = 'review_window' | 'coach_annotation' | 'visual_heuristic' | 'reviewer_confirmed';
 
 export type GameEvent = {
   attempt?: number;
@@ -85,7 +95,7 @@ export type GameEvent = {
   start_ms: number;
   end_ms: number;
   event_type: string;
-  origin: string;
+  origin: EventOrigin | (string & {});
   verified: boolean;
   track_id: string | null;
   clip_uri: string | null;
@@ -117,3 +127,58 @@ export type TracksBatch = {
 };
 
 export type Items<T> = { items: T[] };
+
+// ---- Highlights (docs/HIGHLIGHTS_CONTRACT.md). Scores are highlight priority, never recruiting rankings. ----
+
+export type HighlightStatus = 'not_generated' | 'queued' | 'running' | 'succeeded' | 'failed';
+export type HighlightReviewStatus = 'pending' | 'approved' | 'rejected';
+export type HighlightEventType = 'visual_activity' | 'made_shot' | 'assist' | 'rebound' | 'steal' | 'block';
+
+export type HighlightPlayer = {
+  player_id: string;
+  label: string;
+  track_ids: string[];
+  identity_confirmed: boolean;
+  highlight_score: number | null;
+  verified_play_count: number;
+  candidate_count: number;
+  selected_count: number;
+  observed_ms: number;
+};
+
+export type HighlightCandidate = {
+  candidate_id: string;
+  player_id: string;
+  track_id: string;
+  start_ms: number;
+  end_ms: number;
+  action_start_ms: number;
+  action_end_ms: number;
+  score: number;
+  automatic_score: number;
+  components: Record<string, number>;
+  reasons: string[];
+  review_status: HighlightReviewStatus;
+  event_type: HighlightEventType;
+  origin: 'visual_heuristic' | 'reviewer_confirmed';
+  selected: boolean;
+  clip_id: string | null;
+  clip_uri: string | null;
+  qa_status: string | null;
+};
+
+export type RosterGroup = { player_id: string; label: string; track_ids: string[]; confirmed: true };
+
+export type HighlightBundle = {
+  job_id: string | null;
+  generation_id: string | null;
+  status: HighlightStatus;
+  error: string | null;
+  scoring_version: string;
+  score_kind: string;
+  players: HighlightPlayer[];
+  candidates: HighlightCandidate[];
+  roster_groups: RosterGroup[];
+  max_clips: number;
+  top_per_player: number;
+};

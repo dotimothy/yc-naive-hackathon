@@ -2,6 +2,7 @@ import { StrictMode, useCallback, useEffect, useMemo, useRef, useState, type For
 import { createRoot } from 'react-dom/client';
 import { api, ApiError } from './api';
 import { buildFrameIndex, FilmPlayer, formatMs, Timeline, trackColor, usePlayhead } from './FilmPlayer';
+import { EVENT_TYPE_LABEL, HighlightsPanel } from './HighlightsPanel';
 import type { Clip, Game, GameEvent, Job } from './types';
 import { isTerminal, useGameRoom, type DelayStats, type StreamState } from './useGameRoom';
 import './styles.css';
@@ -200,6 +201,19 @@ function GameRoom({ game }: { game: Game }) {
     [game.duration_ms],
   );
 
+  // Seek and bring the film into view (highlight review sits below the player).
+  const seekAndShow = useCallback(
+    (ms: number, trackId?: string) => {
+      seek(ms);
+      if (trackId) setSelectedTrack(trackId);
+      videoRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    },
+    [seek],
+  );
+
+  const { refresh } = room;
+  const refreshRoom = useCallback(() => void refresh(), [refresh]);
+
   const job = room.activeJob;
   const active = !!job && !isTerminal(job);
 
@@ -285,6 +299,8 @@ function GameRoom({ game }: { game: Game }) {
           )}
         </div>
       </div>
+
+      <HighlightsPanel gameId={game.game_id} jobId={job?.job_id ?? null} analysisActive={active} onSeek={seekAndShow} onUpdated={refreshRoom} />
 
       <ClipsPanel clips={clips} events={events} job={job} onSeek={seek} />
 
@@ -396,7 +412,28 @@ function JobPanel(props: {
 const ORIGIN_LABEL: Record<string, string> = {
   review_window: 'Review window — fixed time split, not a detected play',
   coach_annotation: 'Coach-supplied time range',
+  visual_heuristic: 'Provisional visual activity — heuristic pick, not a verified play',
+  reviewer_confirmed: 'Reviewer-confirmed outcome — human review, not an official stat',
 };
+
+const eventTypeText = (t: string) => EVENT_TYPE_LABEL[t as keyof typeof EVENT_TYPE_LABEL] ?? t.replace(/_/g, ' ');
+
+/** One-line provenance for a clip; never presents heuristic activity as a confirmed outcome. */
+function clipDescription(c: Clip, ev: GameEvent | undefined): string {
+  if (c.kind === 'highlight') {
+    const base =
+      ev?.origin === 'reviewer_confirmed' && ev.event_type !== 'visual_activity'
+        ? `Reviewer-confirmed: ${eventTypeText(ev.event_type)} (not an official stat)`
+        : c.review_status === 'approved'
+        ? 'Reviewer-approved visual activity · no outcome claimed'
+        : 'Provisional visual activity · heuristic highlight pick, unverified';
+    return `${base} · review ${c.review_status ?? 'pending'}`;
+  }
+  if (!ev) return 'Segment';
+  const origin = ORIGIN_LABEL[ev.origin] ?? ev.origin;
+  // Review windows keep their raw event_type; heuristic events are always labelled as provisional above.
+  return ev.event_type && ev.origin !== 'visual_heuristic' ? `${origin} · ${eventTypeText(ev.event_type)}` : origin;
+}
 
 function ClipsPanel({ clips, events, job, onSeek }: { clips: Clip[]; events: Record<string, GameEvent>; job: Job | null; onSeek: (ms: number) => void }) {
   return (
@@ -413,12 +450,16 @@ function ClipsPanel({ clips, events, job, onSeek }: { clips: Clip[]; events: Rec
         <div className="clips">
           {clips.map((c, i) => {
             const ev = c.event_id ? events[c.event_id] : undefined;
+            const highlight = c.kind === 'highlight';
             return (
-              <article key={c.clip_id} className="clip">
+              <article key={c.clip_id} className={highlight ? 'clip highlight' : 'clip'}>
                 <video src={c.uri} controls preload="auto" playsInline />
                 <div className="clip-body">
                   <div className="clip-title">
-                    <strong>Clip {i + 1}</strong>
+                    <strong>
+                      {highlight ? 'Highlight pick' : `Clip ${i + 1}`}
+                      {c.track_id ? <code className="clip-track"> T{c.track_id}</code> : null}
+                    </strong>
                     <span className={`qa ${c.qa_status === 'passed' ? 'ok' : 'bad'}`}>QA {c.qa_status}</span>
                   </div>
                   <p className="range">
@@ -429,9 +470,13 @@ function ClipsPanel({ clips, events, job, onSeek }: { clips: Clip[]; events: Rec
                       ffprobe {c.measured_duration_ms} ms vs expected {c.expected_duration_ms} ms (±{c.tolerance_ms} ms)
                     </p>
                   )}
+                  {highlight && typeof c.highlight_score === 'number' && Number.isFinite(c.highlight_score) && (
+                    <p className="small">
+                      Highlight priority <b>{Math.round(c.highlight_score)}</b>/100 <span className="muted">· footage-review order, not a talent rating</span>
+                    </p>
+                  )}
                   <p className="fineprint">
-                    {ev ? ORIGIN_LABEL[ev.origin] ?? ev.origin : 'Segment'}
-                    {ev?.event_type ? ` · ${ev.event_type}` : ''} · {c.identity_verified ? 'identity verified' : 'identity unverified'}
+                    {clipDescription(c, ev)} · {c.identity_verified ? 'identity verified' : 'identity unverified'}
                   </p>
                   <div className="clip-actions">
                     <button className="secondary small" onClick={() => onSeek(c.source_start_ms)}>Seek source</button>

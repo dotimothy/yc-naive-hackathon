@@ -9,6 +9,7 @@ import numpy as np
 import torch
 from workers.video.runtime import select_device, get_model, infer
 from workers.video.tracker import Tracker
+from workers.video.highlights import build_highlights, render_highlights
 from workers.render.media import probe, render_clip, verify_clip, sha256
 
 NAMES = [
@@ -149,18 +150,28 @@ def process_video(source_path, output_dir, options, emit):
         )
     if index == 0:
         raise ValueError("No decodable video frames")
+    emit("phase", {"phase": "score"})
+    bundle = build_highlights(
+        samples, metadata["duration_ms"], metadata["fps"], stride, options["job_id"]
+    )
+    clips, events = render_highlights(source_path, output_dir, bundle, game, emit)
     emit("phase", {"phase": "render"})
-    ranges = options.get("candidate_ranges") or [
-        dict(
-            start_ms=0, end_ms=metadata["duration_ms"] // 2, event_type="review_segment"
-        ),
-        dict(
-            start_ms=metadata["duration_ms"] // 2,
-            end_ms=metadata["duration_ms"],
-            event_type="review_segment",
-        ),
-    ]
-    clips, events = [], []
+    ranges = options.get("candidate_ranges") or (
+        []
+        if clips
+        else [
+            dict(
+                start_ms=0,
+                end_ms=metadata["duration_ms"] // 2,
+                event_type="review_segment",
+            ),
+            dict(
+                start_ms=metadata["duration_ms"] // 2,
+                end_ms=metadata["duration_ms"],
+                event_type="review_segment",
+            ),
+        ]
+    )
     for i, cut in enumerate(ranges):
         start, end = cut["start_ms"], cut["end_ms"]
         path = render_clip(source_path, start, end, output_dir / ("clip_%d.mp4" % i))
@@ -225,6 +236,12 @@ def process_video(source_path, output_dir, options, emit):
         realtime_factor=(metadata["duration_ms"] / 1000) / elapsed,
         clips=clips,
         events=events,
+        highlight_summary=dict(
+            players=len(bundle["players"]),
+            candidates=len(bundle["candidates"]),
+            selected=sum(c["selected"] for c in bundle["candidates"]),
+            score_kind="highlight_priority",
+        ),
     )
     (output_dir / "tracks.json").write_text(json.dumps(samples))
     temporary = output_dir / "report.tmp.json"

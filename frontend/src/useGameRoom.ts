@@ -72,9 +72,11 @@ function reducer(state: RoomState, action: Action): RoomState {
       const sameScope = latestId === state.activeJobId && (latest?.attempts ?? 0) === state.attempt;
       const tracks = new Map(sameScope ? state.tracks : undefined);
       for (const s of action.tracks) tracks.set(sampleKey(s), s);
-      const clips = { ...(sameScope ? state.clips : {}) };
+      // Fetched clips/events are authoritative replacements: highlight review edits and regeneration
+      // remove obsolete selections server-side, so stale entries must not linger from earlier state.
+      const clips: Record<string, Clip> = {};
       for (const c of action.clips) clips[c.clip_id] = c;
-      const events = { ...(sameScope ? state.events : {}) };
+      const events: Record<string, GameEvent> = {};
       for (const e of action.events) events[e.event_id] = e;
       const known = new Set(action.jobs.map((j) => j.job_id));
       // Keep any job seen on the stream that the list request did not yet include.

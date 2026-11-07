@@ -25,7 +25,7 @@ For frontend development, run `npm --prefix frontend run dev` alongside the API 
 - IoU/Hungarian baseline tracking; game-local IDs are temporary tracks, not athlete identity. Outdoor sample uses a manually marked court polygon to reduce off-court detections. This does not classify referees or guarantee athlete-only output.
 - Persisted SQLite jobs, audit, track batches, clips and replayable SSE. Request keys deduplicate analysis; reconnect uses Last-Event-ID. Only one active job per game and one inference worker per API process.
 - Video viewer with synchronized sampled overlays and source-timed review clips.
-- Two default review windows are rendered with FFmpeg. They are neither discovered sports events nor verified athlete highlights. Coach-supplied time ranges can be sent through the API.
+- Automatic scored highlights are rendered with FFmpeg; two fixed review windows remain a fallback if no candidate qualifies. See [scoring and review](HIGHLIGHT_SCORING.md). They are neither discovered sports events nor verified athlete highlights. Coach-supplied time ranges can be sent through the API.
 - Independent clip checks: source bounds, duration tolerance, full decoding, hashes and first-frame visual alignment sanity check (mean absolute pixel error at reduced resolution). Static imagery can pass that sanity check at multiple timestamps; the source/time edit recipe remains essential provenance.
 - Transient OSError/timeouts retry the whole job at most twice, replacing that job's materialized outputs and retaining audit history. A server restart marks interrupted jobs failed; resubmit explicitly with a new request key. Other processing errors fail visibly.
 
@@ -53,7 +53,7 @@ Chrome browser integration checked source and clip playback, seeking with overla
 
 ## Boundaries and next work
 
-This is the first video/dashboard/clip milestone, not full Stage 1 acceptance. Private profiles and roster verification, outreach simulation, phase-specific resume, model accuracy evaluation, better occlusion tracking and durable scheduling remain to be implemented. `/api/profiles` returns an empty list until consent/identity handling exists. No player suitability scores, jersey identities or official event statistics are generated.
+This is the first video/dashboard/clip milestone, not full Stage 1 acceptance. Private profiles and roster verification, outreach simulation, phase-specific resume, model accuracy evaluation, better occlusion tracking and durable scheduling remain to be implemented. `/api/profiles` returns an empty list until consent/identity handling exists. Highlight-priority scores and reviewer-confirmed outcome labels are now available; player suitability scores, automatic jersey identities and official event statistics are not generated.
 
 The baseline can miss people, include referees and fragment IDs. It is sampled batch analysis, not demonstrated real-time live coverage. Measure latency from each actual run; browser transport delay is distinct from model inference speed.
 

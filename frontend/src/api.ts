@@ -1,5 +1,17 @@
 // Service layer: the only module that knows backend routes.
-import type { Clip, Envelope, Game, GameEvent, Items, Job, TrackSample } from './types';
+import type {
+  Clip,
+  Envelope,
+  Game,
+  GameEvent,
+  HighlightBundle,
+  HighlightEventType,
+  HighlightReviewStatus,
+  Items,
+  Job,
+  RosterGroup,
+  TrackSample,
+} from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -96,6 +108,32 @@ export const api = {
 
   events: (gameId: string, signal?: AbortSignal) =>
     request<Items<GameEvent>>(`/api/games/${enc(gameId)}/events`, { signal }).then((r) => r.items),
+
+  highlights: (gameId: string, signal?: AbortSignal) =>
+    request<HighlightBundle>(`/api/games/${enc(gameId)}/highlights`, { signal }),
+
+  /** Returns 202 + bundle. Reuses latest successful analysis tracks; no inference rerun. */
+  generateHighlights: (gameId: string, body: { max_clips: number; top_per_player: number }, idempotencyKey: string) =>
+    request<HighlightBundle>(`/api/games/${enc(gameId)}/highlights`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify(body),
+    }),
+
+  reviewHighlight: (gameId: string, candidateId: string, body: { decision: HighlightReviewStatus; event_type: HighlightEventType }) =>
+    request<HighlightBundle>(`/api/games/${enc(gameId)}/highlights/candidates/${enc(candidateId)}/review`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+
+  /** Full replacement of reviewer-confirmed groups. */
+  setHighlightPlayers: (gameId: string, players: RosterGroup[]) =>
+    request<HighlightBundle>(`/api/games/${enc(gameId)}/highlights/players`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ players }),
+    }),
 
   /** Opens the replayable SSE stream. Caller must call close(). */
   stream(
