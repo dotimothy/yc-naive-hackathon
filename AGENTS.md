@@ -48,3 +48,7 @@ First thin-slice gate: one MP4 submission produces actual tracking updates visib
 Use only authorized footage; request a source if none exists. Synthetic media can test plumbing but cannot validate basketball recognition. Keep uploads, rosters, generated clips, databases, checkpoints and secrets out of Git. Commit only small licensed fixtures or retrieval manifests with hashes and license/permission notes. Bind local services to loopback by default; serve only registered media artifacts, never arbitrary paths.
 
 Do not fabricate events, identities, accuracy, latency or official stats. Unknown jerseys remain unverified. Link profile clips only through a supplied verified roster mapping and explicit consent; profiles stay private. No facial identity recognition, athlete rankings, unsolicited recruiting outreach or public publication. External sends, publishing and real payments are outside the local prototype.
+
+## Reusable team workflows
+
+See [team workflows](docs/TEAM_WORKFLOWS.md) for task ownership, cross-team handoffs, review/release gates and context flush/resume templates.

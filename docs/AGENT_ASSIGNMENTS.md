@@ -45,3 +45,7 @@ In the main conversation, create the two isolated worktrees, launch Claude
 for video and Codex for platform, and start the shared model/fixture baseline.
 Claude CLI is installed at /Users/tim/.local/bin/claude; authentication and
 runtime availability still need verification before launching work.
+
+## Reusable team workflows
+
+See [team workflows](TEAM_WORKFLOWS.md) for task ownership, cross-team handoffs, review/release gates and context flush/resume templates.

@@ -1,0 +1,26 @@
+{
+  "template_version": 1,
+  "team_id": "replace-with-team-id",
+  "purpose": "replace-with-outcome",
+  "provider_lead": "unassigned",
+  "consumer_lead": "unassigned",
+  "repository": "owner/repository",
+  "integration_branch": "develop",
+  "release_branch": "main",
+  "owned_paths": [],
+  "shared_paths_require_integration_lead": [],
+  "interfaces": [
+    {
+      "name": "replace-with-interface",
+      "version": "v0",
+      "contract_ref": "path@commit",
+      "fixture_ref": "path@commit",
+      "acceptance_command": "replace-with-command"
+    }
+  ],
+  "task_record": "docs/tasks/<task-id>.md",
+  "handoff_record": "docs/handoffs/<task-id>.md",
+  "release_owner": "unassigned",
+  "escalation_contact": "unassigned",
+  "notes": "Template only; no runner consumes or enforces this manifest yet."
+}
