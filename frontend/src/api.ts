@@ -1,0 +1,118 @@
+// Service layer: the only module that knows backend routes.
+import type { Clip, Envelope, Game, GameEvent, Items, Job, TrackSample } from './types';
+
+export class ApiError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+  }
+}
+
+function detailMessage(body: unknown, status: number): string {
+  if (body && typeof body === 'object' && 'detail' in body) {
+    const detail = (body as { detail: unknown }).detail;
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) {
+      return detail
+        .map((d) => (d && typeof d === 'object' && 'msg' in d ? String((d as { msg: unknown }).msg) : String(d)))
+        .join('; ');
+    }
+  }
+  if (status === 0) return 'Local API unreachable. Is the backend running on 127.0.0.1:8000?';
+  return `Request failed (HTTP ${status})`;
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(path, init);
+  } catch (error) {
+    if ((error as Error).name === 'AbortError') throw error;
+    throw new ApiError(0, detailMessage(null, 0));
+  }
+  const text = await response.text();
+  let body: unknown = null;
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = null;
+    }
+  }
+  if (!response.ok) throw new ApiError(response.status, detailMessage(body, response.status));
+  return body as T;
+}
+
+const enc = encodeURIComponent;
+
+export const api = {
+  listGames: (signal?: AbortSignal) => request<Items<Game>>('/api/games', { signal }).then((r) => r.items),
+
+  loadSample: () => request<Game>('/api/games/sample', { method: 'POST' }),
+
+  /** Multipart upload with progress (fetch cannot report upload progress). */
+  uploadGame(file: File, rightsConfirmed: boolean, onProgress?: (fraction: number) => void): Promise<Game> {
+    return new Promise((resolve, reject) => {
+      const form = new FormData();
+      form.append('video', file);
+      form.append('rights_confirmed', rightsConfirmed ? 'true' : 'false');
+      form.append('sport', 'basketball');
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/games');
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) onProgress?.(e.loaded / e.total);
+      };
+      xhr.onerror = () => reject(new ApiError(0, detailMessage(null, 0)));
+      xhr.onload = () => {
+        let body: unknown = null;
+        try {
+          body = JSON.parse(xhr.responseText);
+        } catch {
+          body = null;
+        }
+        if (xhr.status >= 200 && xhr.status < 300) resolve(body as Game);
+        else reject(new ApiError(xhr.status, detailMessage(body, xhr.status)));
+      };
+      xhr.send(form);
+    });
+  },
+
+  analyze: (gameId: string, idempotencyKey: string) =>
+    request<Job>(`/api/games/${enc(gameId)}/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify({ stride: 5, replay_paced: false }),
+    }),
+
+  listJobs: (gameId: string, signal?: AbortSignal) =>
+    request<Items<Job>>(`/api/games/${enc(gameId)}/jobs`, { signal }).then((r) => r.items),
+
+  getJob: (jobId: string, signal?: AbortSignal) => request<Job>(`/api/jobs/${enc(jobId)}`, { signal }),
+
+  tracks: (gameId: string, signal?: AbortSignal) =>
+    request<Items<TrackSample>>(`/api/games/${enc(gameId)}/tracks`, { signal }).then((r) => r.items),
+
+  clips: (gameId: string, signal?: AbortSignal) =>
+    request<Items<Clip>>(`/api/games/${enc(gameId)}/clips`, { signal }).then((r) => r.items),
+
+  events: (gameId: string, signal?: AbortSignal) =>
+    request<Items<GameEvent>>(`/api/games/${enc(gameId)}/events`, { signal }).then((r) => r.items),
+
+  /** Opens the replayable SSE stream. Caller must call close(). */
+  stream(
+    gameId: string,
+    handlers: { onEnvelope: (e: Envelope, receivedAtMs: number) => void; onOpen: () => void; onError: () => void },
+  ): EventSource {
+    const source = new EventSource(`/api/games/${enc(gameId)}/stream`);
+    source.onopen = handlers.onOpen;
+    source.onerror = handlers.onError;
+    source.onmessage = (message) => {
+      const receivedAt = Date.now();
+      try {
+        handlers.onEnvelope(JSON.parse(message.data) as Envelope, receivedAt);
+      } catch {
+        // Malformed envelope: skip rather than corrupt state.
+      }
+    };
+    return source;
+  },
+};

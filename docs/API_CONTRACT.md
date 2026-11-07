@@ -2,6 +2,12 @@
 
 Proposed local interface, to be implemented. FastAPI/Pydantic models will be canonical; frontend types and fixture payloads must match them. Integration lead owns changes. All IDs are opaque strings; source times are integer milliseconds; confidence is 0–1; unavailable values are null.
 
+## First implementation status
+
+The local API implements the video/job/track/clip subset plus game listing, sample loading and game job listing. Profiles currently return an empty list. The remaining profile/consent workflow is planned. Additional implemented analysis options: `stride` (1–20, default 5), `confidence` (0.1–0.99, default 0.75). Sample court polygons are manually supplied game metadata.
+
+Current deviations from the initial proposal: pose points expose `visibility` rather than an invented calibrated confidence; default segment origin is `review_window` and events remain unverified. SSE adds `server_timestamp_ms` for transport-delay measurement. Transient retries restart the whole job (max three executions) rather than resuming a phase; interrupted jobs fail explicitly on API restart. API validation errors use FastAPI’s `detail` shape. These limits must remain visible until their implementations change.
+
 ## Sport context
 
 Each game includes `sport`; multipart upload accepts `sport`, defaulting to `basketball`. Stage 1 supports only `basketball` and rejects unsupported values explicitly. Pass sport through worker options and resolve sport-specific event vocabulary/court configuration there. Shared tracking and clip records remain sport-neutral; event types are interpreted in the parent game’s sport context. Other sports are planned, not implemented.
