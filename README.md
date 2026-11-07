@@ -7,6 +7,7 @@ Build a sports video intelligence platform, starting with basketball. The first 
 - [Agent instructions and ownership](AGENTS.md)
 - [Prototype workstreams and acceptance](docs/PROTOTYPE_PLAN.md)
 - [Shared API and worker contract](docs/API_CONTRACT.md)
+- [TrackID3x3 dataset findings and analysis commands](docs/datasets/TRACKID3X3.md)
 - [Planning document](https://docs.google.com/document/d/1kEtq_jr14fybmyRyH_d0h5GALDyeX0YExyt-AdtnJrM/edit)
 
-Current status: planning baseline only; app bootstrap and run commands are the next implementation task. Authorized basketball footage is required to validate real CV output.
+Current status: TrackID3x3 indoor annotations analyzed and a matching video sample downloaded locally. App and inference pipeline are not implemented yet. See the dataset findings for measured results and next steps.
