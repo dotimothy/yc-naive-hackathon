@@ -14,14 +14,14 @@ npm --prefix frontend run build
 scripts/run_local.sh
 ```
 
-Open http://127.0.0.1:8000. Load the sample, then run analysis. The first analysis downloads Torchvision COCO Keypoint R-CNN weights (~226 MB); subsequent runs use the local cache. Keep this cache and the sample to demonstrate offline. No external inference, Naive or sponsor service is used.
+Open http://127.0.0.1:8000. Load the sample, then run analysis. The first analysis downloads Torchvision COCO Keypoint R-CNN weights (~226 MB); subsequent runs use the local cache. Keep this cache and the sample to demonstrate offline. No external inference, Naive or sponsor service is used. The worker now defaults to accelerated device selection; see [acceleration setup and benchmarks](ACCELERATION.md).
 
 For frontend development, run `npm --prefix frontend run dev` alongside the API and open the Vite URL. Vite proxies `/api` to port 8000. The production frontend build is served by FastAPI; restart the API after the first build. Python 3.9.6 and Node 26.13.0 were used locally. `requirements.lock.txt` records the macOS arm64/Python 3.9 resolution; other platforms should resolve `requirements.txt`. Linux CPU users can install matching CPU Torch/Torchvision wheels from the official PyTorch index before the remaining dependencies.
 
 ## Current vertical slice
 
 - Rights-confirmed MP4 upload, probing and source SHA-256; 250 MiB/30-minute/4K input limits.
-- Background CPU person/pose inference with Torchvision Keypoint R-CNN COCO_V1, every fifth source frame by default. Pose uses COCO17 points, separately from TrackID3x3's ten-keypoint ground truth.
+- Background person/pose inference with automatic CUDA/MPS/CPU selection with Torchvision Keypoint R-CNN COCO_V1, every fifth source frame by default. Pose uses COCO17 points, separately from TrackID3x3's ten-keypoint ground truth.
 - IoU/Hungarian baseline tracking; game-local IDs are temporary tracks, not athlete identity. Outdoor sample uses a manually marked court polygon to reduce off-court detections. This does not classify referees or guarantee athlete-only output.
 - Persisted SQLite jobs, audit, track batches, clips and replayable SSE. Request keys deduplicate analysis; reconnect uses Last-Event-ID. Only one active job per game and one inference worker per API process.
 - Video viewer with synchronized sampled overlays and source-timed review clips.
@@ -47,7 +47,7 @@ The tests use generated media and a stub inference worker only for API failure i
 
 ## Measured local run (2026-11-07)
 
-Outdoor 12.012-second source: 360 decoded frames, 72 inference frames (stride 5), 545 track samples, 29 temporary track IDs. Latest run: **1.47 inference FPS**, **51.5 seconds wall time**, 0.23× realtime factor. Two clips of 6.006 seconds each passed full decoding, range/duration checks and first-frame alignment sanity checks (MAE 1.34 and 1.61 / 255). Temporary ID count reflects fragmentation and non-athletes, not 29 players.
+Outdoor 12.012-second source: 360 decoded frames, 72 inference frames (stride 5), 545 track samples, 29 temporary track IDs. Initial CPU baseline: **1.47 inference FPS**, **51.5 seconds wall time**, 0.23× realtime factor. Two clips of 6.006 seconds each passed full decoding, range/duration checks and first-frame alignment sanity checks (MAE 1.34 and 1.61 / 255). Temporary ID count reflects fragmentation and non-athletes, not 29 players.
 
 Chrome browser integration checked source and clip playback, seeking with overlay updates, a browser-triggered analysis reaching success, persisted reload, and 390px mobile layout with no horizontal overflow or JavaScript exceptions. During the observed live-update window, server-write-to-browser median transport delay was 115 ms over 20 updates; this is not end-to-end inference latency. Four automated tests and Python lint/frontend typecheck/build passed.
 

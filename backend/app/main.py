@@ -14,12 +14,14 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 from workers.render.media import probe, sha256
 from workers.video.pipeline import process_video
+from workers.video.runtime import available_devices, select_device
 from workers.video.sports.basketball import OUTDOOR_SAMPLE_COURT
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -212,6 +214,7 @@ def run_job(id):
 
 @asynccontextmanager
 async def lifespan(app):
+    select_device()  # Fail startup on an unavailable explicit runtime device.
     initialize()
     for job in all_records("job"):
         if job["status"] in ("queued", "running"):
@@ -231,6 +234,8 @@ def health():
     return {
         "status": "ok",
         "mode": "local",
+        "inference_devices": available_devices(),
+        "default_inference_device": select_device(),
         "ffmpeg": bool(shutil.which("ffmpeg")),
         "ffprobe": bool(shutil.which("ffprobe")),
     }
@@ -341,6 +346,7 @@ class Cut(BaseModel):
 
 
 class Analysis(BaseModel):
+    device: Optional[str] = Field(default=None, min_length=1, max_length=20)
     candidate_ranges: list[Cut] = Field(default_factory=list, max_length=10)
     replay_paced: bool = False
     stride: int = Field(default=5, ge=1, le=20)
@@ -353,6 +359,10 @@ def analyze(
 ):
     game = get("game", game_id)
     options = body.model_dump()
+    try:
+        select_device(options["device"])
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
     if game.get("court_polygon"):
         options["court_polygon"] = game["court_polygon"]
     if any(c["end_ms"] > game["duration_ms"] for c in options["candidate_ranges"]):

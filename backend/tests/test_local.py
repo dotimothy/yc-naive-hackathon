@@ -151,3 +151,22 @@ def test_tracker_reorder_and_expiration():
     tracker.update([])
     tracker.update([])
     assert tracker.update([[1, 0, 11, 10]]) == [3]
+
+
+def test_unavailable_device_rejected_before_queue(client, video, monkeypatch):
+    game = submit(client, video).json()
+    original = main.select_device
+
+    def reject_unavailable(device=None):
+        if device == "cuda:9999":
+            raise ValueError("Requested CUDA device unavailable")
+        return original(device)
+
+    monkeypatch.setattr(main, "select_device", reject_unavailable)
+    response = client.post(
+        "/api/games/" + game["game_id"] + "/analyze",
+        json={"device": "cuda:9999"},
+        headers={"Idempotency-Key": "bad-device"},
+    )
+    assert response.status_code == 422
+    assert client.get("/api/games/" + game["game_id"] + "/jobs").json()["items"] == []

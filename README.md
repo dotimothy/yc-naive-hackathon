@@ -4,6 +4,7 @@ Private YC Naive Hackathon prototype; product name is provisional.
 
 Build a sports video intelligence platform, starting with basketball. The first local workflow is video → pose/tracking → replay dashboard → source-verified clips, followed by private opt-in athlete profiles. Keep shared media processing reusable across sports; validate basketball first. Naive orchestration and sponsors follow after the local core is accepted.
 
+- [GPU acceleration and CUDA worker setup](docs/ACCELERATION.md)
 - [Run the local prototype](docs/LOCAL_PROTOTYPE.md)
 - [Agent instructions and ownership](AGENTS.md)
 - [Prototype workstreams and acceptance](docs/PROTOTYPE_PLAN.md)

@@ -1,15 +1,13 @@
 """Deterministic local inference worker, isolated from API and persistence."""
 
 import json
+import os
 import time
 from pathlib import Path
 import cv2
 import numpy as np
 import torch
-from torchvision.models.detection import (
-    keypointrcnn_resnet50_fpn,
-    KeypointRCNN_ResNet50_FPN_Weights,
-)
+from workers.video.runtime import select_device, get_model, infer
 from workers.video.tracker import Tracker
 from workers.render.media import probe, render_clip, verify_clip, sha256
 
@@ -43,33 +41,33 @@ def process_video(source_path, output_dir, options, emit):
     output_dir.mkdir(parents=True, exist_ok=True)
     game = options["game_id"]
     stride = options.get("stride", 5)
-    device = options.get("device", "cpu")
-    torch.set_num_threads(4)
-    emit("phase", {"phase": "track"})
-    # Torchvision code is BSD-3-Clause; weights are COCO pretrained. No Ultralytics dependency.
-    model = (
-        keypointrcnn_resnet50_fpn(
-            weights=KeypointRCNN_ResNet50_FPN_Weights.COCO_V1,
-            min_size=480,
-            max_size=854,
-            box_detections_per_img=30,
-        )
-        .eval()
-        .to(device)
+    requested_device = options.get("device") or os.environ.get(
+        "SCOUTFILM_DEVICE", "auto"
     )
+    device = select_device(options.get("device"))
+    emit("phase", {"phase": "track"})
+    model, model_load_seconds, model_cache_hit = get_model(device)
+    # Reject low-score detections before the expensive pose head, not after it.
+    # A single worker owns the cached model and sets this for every job.
+    model.roi_heads.score_thresh = options.get("confidence", 0.75)
     tracker, samples, processed = Tracker(), [], 0
     cap = cv2.VideoCapture(str(source_path))
     inference_time = 0.0
+    transfer_time = 0.0
+    first_inference_seconds = None
     replay_start = time.perf_counter()
     index = 0
     try:
         while True:
-            ok, frame = cap.read()
+            ok = cap.grab()
             if not ok:
                 break
             if index % stride:
                 index += 1
                 continue
+            ok, frame = cap.retrieve()
+            if not ok:
+                break
             timestamp = round(index / metadata["fps"] * 1000)
             if options.get("replay_paced"):
                 time.sleep(
@@ -80,12 +78,13 @@ def process_video(source_path, output_dir, options, emit):
                 .permute(2, 0, 1)
                 .float()
                 .div(255)
-                .to(device)
+                .to("cpu" if device == "mps" else device)
             )
-            before = time.perf_counter()
-            with torch.inference_mode():
-                result = {k: v.cpu() for k, v in model([tensor])[0].items()}
-            inference_time += time.perf_counter() - before
+            result, seconds, copy_seconds = infer(model, tensor, device)
+            inference_time += seconds
+            transfer_time += copy_seconds
+            if first_inference_seconds is None:
+                first_inference_seconds = seconds
             keep = result["scores"] >= options.get("confidence", 0.75)
             if options.get("court_polygon"):
                 polygon = np.array(options["court_polygon"], dtype=np.float32)
@@ -203,6 +202,15 @@ def process_video(source_path, output_dir, options, emit):
     report = dict(
         source_sha256=sha256(source_path),
         metadata=metadata,
+        requested_device=requested_device,
+        device=device,
+        execution_mode="mps-hybrid" if device == "mps" else device,
+        model_cache_hit=model_cache_hit,
+        model_load_seconds=model_load_seconds,
+        inference_seconds=inference_time,
+        output_transfer_seconds=transfer_time,
+        first_inference_seconds=first_inference_seconds,
+        precision="float32",
         model="torchvision/keypointrcnn_resnet50_fpn/COCO_V1",
         tracker="IoU Hungarian baseline",
         stride=stride,

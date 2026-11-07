@@ -346,6 +346,8 @@ function JobPanel(props: {
             {progress?.processed_frames !== undefined && !report && <div><dt>Frames processed</dt><dd>{progress.processed_frames}</dd></div>}
             {report && (
               <>
+                <div><dt>Inference device</dt><dd>{report.execution_mode ?? report.device ?? "cpu (legacy run)"}</dd></div>
+                <div><dt>Model load</dt><dd>{fmt(report.model_load_seconds ?? 0, 2)} s{report.model_cache_hit ? " · cached" : ""}</dd></div>
                 <div><dt>Inference FPS (measured)</dt><dd>{fmt(report.inference_fps, 2)}</dd></div>
                 <div><dt>Processed / decoded frames</dt><dd>{report.processed_frames}{report.decoded_frames !== undefined ? ` / ${report.decoded_frames}` : ''}</dd></div>
                 <div><dt>Stride</dt><dd>every {report.stride} frame{report.stride === 1 ? '' : 's'}</dd></div>

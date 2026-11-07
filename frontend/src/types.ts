@@ -19,6 +19,11 @@ export type Game = {
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed';
 
 export type JobReport = {
+  device?: string;
+  execution_mode?: string;
+  precision?: string;
+  model_cache_hit?: boolean;
+  model_load_seconds?: number;
   processed_frames: number;
   decoded_frames?: number;
   track_samples: number;
