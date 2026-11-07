@@ -53,6 +53,11 @@ export type Job = {
 export type Keypoint = { name: string; x: number; y: number; visibility: number };
 
 export type TrackSample = {
+  player_id?: string;
+  player_label?: string;
+  raw_track_id?: string;
+  identity_status?: 'new' | 'continued' | 'reidentified' | 'ambiguous';
+  association_confidence?: number | null;
   game_id?: string;
   track_id: string;
   timestamp_ms: number;
@@ -135,6 +140,9 @@ export type HighlightReviewStatus = 'pending' | 'approved' | 'rejected';
 export type HighlightEventType = 'visual_activity' | 'made_shot' | 'assist' | 'rebound' | 'steal' | 'block';
 
 export type HighlightPlayer = {
+  identity_source?: 'automatic' | 'reviewer' | 'track';
+  association_status?: string;
+  association_confidence?: number | null;
   player_id: string;
   label: string;
   track_ids: string[];

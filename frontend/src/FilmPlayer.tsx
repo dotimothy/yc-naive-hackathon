@@ -14,7 +14,7 @@ const SKELETON: [string, string][] = [
   ['right_ear', 'right_shoulder'],
 ];
 
-export type TrackSummary = { id: string; count: number; first_ms: number; last_ms: number };
+export type TrackSummary = { playerLabel?: string; id: string; count: number; first_ms: number; last_ms: number };
 
 export type FrameIndex = {
   times: number[];
@@ -34,7 +34,7 @@ export function buildFrameIndex(tracks: Map<string, TrackSample>): FrameIndex {
       t.count++;
       t.first_ms = Math.min(t.first_ms, s.timestamp_ms);
       t.last_ms = Math.max(t.last_ms, s.timestamp_ms);
-    } else summary.set(s.track_id, { id: s.track_id, count: 1, first_ms: s.timestamp_ms, last_ms: s.timestamp_ms });
+    } else summary.set(s.track_id, { playerLabel: s.player_label, id: s.track_id, count: 1, first_ms: s.timestamp_ms, last_ms: s.timestamp_ms });
   }
   const times = [...byTime.keys()].sort((a, b) => a - b);
   const trackIds = [...summary.values()].sort((a, b) => b.count - a.count || a.id.localeCompare(b.id, undefined, { numeric: true }));
@@ -149,7 +149,8 @@ export function FilmPlayer({ game, videoRef, playheadMs, index, showBoxes, showP
         />
         <svg className="overlay" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
           {visible.map((s) => {
-            const color = trackColor(s.track_id);
+            const color = trackColor(s.player_id ?? s.track_id);
+            const label = s.player_label ?? `T${s.track_id}`;
             const [x, y, w, h] = s.bbox;
             const pts = new Map(s.keypoints.map((k) => [k.name, k]));
             return (
@@ -157,9 +158,9 @@ export function FilmPlayer({ game, videoRef, playheadMs, index, showBoxes, showP
                 {showBoxes && (
                   <>
                     <rect x={x * W} y={y * H} width={w * W} height={h * H} fill="none" stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke" />
-                    <rect x={x * W} y={y * H - font * 1.3} width={font * 0.62 * (`T${s.track_id} ${s.confidence.toFixed(2)}`.length + 1)} height={font * 1.3} fill={color} opacity={0.85} />
+                    <rect x={x * W} y={y * H - font * 1.3} width={font * 0.62 * (`${label} ${s.confidence.toFixed(2)}`.length + 1)} height={font * 1.3} fill={color} opacity={0.85} />
                     <text x={x * W + font * 0.3} y={y * H - font * 0.35} fontSize={font} fill="#0b0d10" fontWeight={700}>
-                      T{s.track_id} {s.confidence.toFixed(2)}
+                      {label} {s.confidence.toFixed(2)}
                     </text>
                   </>
                 )}

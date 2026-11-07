@@ -266,7 +266,7 @@ function GameRoom({ game }: { game: Game }) {
                 <option value="">All tracks ({index.trackIds.length})</option>
                 {index.trackIds.map((t) => (
                   <option key={t.id} value={t.id}>
-                    T{t.id} · {t.count} samples · {formatMs(t.first_ms)}–{formatMs(t.last_ms)}
+                    {t.playerLabel ? `${t.playerLabel} · ` : ""}T{t.id} · {t.count} samples · {formatMs(t.first_ms)}–{formatMs(t.last_ms)}
                   </option>
                 ))}
               </select>
@@ -276,7 +276,7 @@ function GameRoom({ game }: { game: Game }) {
           <Timeline durationMs={game.duration_ms} playheadMs={playheadMs} index={index} clips={clips} selectedTrack={selectedTrack} onSeek={seek} />
           <p className="fineprint">
             Boxes and keypoints are raw person-detector/pose predictions on sampled frames, shown at the nearest prior sample within 400 ms — never interpolated.
-            Track IDs (T#) are temporary tracker IDs: they can switch, fragment, or belong to spectators, referees or bench players. No identity, jersey or name is inferred.
+            Player labels reconnect temporary track fragments using uniform appearance and motion; these associations can be wrong and remain provisional. Tracks can include referees or spectators. No names or jersey numbers are inferred.
             Keypoint dots show the model's visibility flag, not a calibrated confidence.
           </p>
         </section>

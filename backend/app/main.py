@@ -467,6 +467,27 @@ def tracks(game_id: str, after_ms: int = -1):
     latest = latest_job_id(game_id)
     batches = [b for b in all_records("batch") if b["job_id"] == latest]
     items = [s for b in batches for s in b["items"] if s["timestamp_ms"] > after_ms]
+    manifests = [
+        bundle for bundle in all_records("highlights") if bundle["job_id"] == latest
+    ]
+    overrides = {
+        track: group
+        for bundle in manifests
+        for group in bundle.get("roster_groups", [])
+        for track in group["track_ids"]
+    }
+    items = [
+        dict(
+            sample,
+            player_id=overrides[sample["track_id"]]["player_id"],
+            player_label=overrides[sample["track_id"]]["label"],
+            identity_source="reviewer",
+            identity_confirmed=True,
+        )
+        if sample["track_id"] in overrides
+        else sample
+        for sample in items
+    ]
     return {"items": items}
 
 

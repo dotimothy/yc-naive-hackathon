@@ -409,7 +409,7 @@ function HighlightsPanelInner({ gameId, jobId, analysisActive, onSeek, onUpdated
             </div>
           )}
           <p className="fineprint">
-            Provisional groups are temporary tracker IDs: they can switch, fragment, or be referees, bench players or spectators. Confirmed groups exist only
+            Automatic player IDs connect track fragments using uniform appearance and movement. They remain provisional; uncertain matches need review and can include non-players. Confirmed groups exist only
             because a reviewer grouped them. Observed duration counts sampled frames where the track was seen, not minutes played. Cards are ordered by highlight priority, lowest to highest; unscored tracks appear last.
           </p>
 
@@ -516,7 +516,7 @@ function PlayerCard({ player: p, active, onFilter, onGroup, canGroup }: { player
     <article className={`hl-player ${p.identity_confirmed ? 'confirmed' : 'provisional'}${active ? ' on' : ''}`}>
       <header>
         <strong title={p.player_id}>{p.label}</strong>
-        <span className={`hl-badge ${p.identity_confirmed ? 'ok' : ''}`}>{p.identity_confirmed ? 'Confirmed' : 'Provisional'}</span>
+        <span className={`hl-badge ${p.identity_confirmed ? 'ok' : ''}`}>{p.identity_confirmed ? 'Confirmed' : p.association_status === 'needs_review' ? 'Association needs review' : p.identity_source === 'automatic' ? 'Automatic player ID' : 'Provisional'}</span>
       </header>
       <div className="hl-score">
         {p.highlight_score !== null && Number.isFinite(p.highlight_score) ? (
