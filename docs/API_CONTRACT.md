@@ -2,6 +2,10 @@
 
 Proposed local interface, to be implemented. FastAPI/Pydantic models will be canonical; frontend types and fixture payloads must match them. Integration lead owns changes. All IDs are opaque strings; source times are integer milliseconds; confidence is 0–1; unavailable values are null.
 
+## Sport context
+
+Each game includes `sport`; multipart upload accepts `sport`, defaulting to `basketball`. Stage 1 supports only `basketball` and rejects unsupported values explicitly. Pass sport through worker options and resolve sport-specific event vocabulary/court configuration there. Shared tracking and clip records remain sport-neutral; event types are interpreted in the parent game’s sport context. Other sports are planned, not implemented.
+
 ## Records
 
 - `GameEvent`: `event_id, game_id, chunk_id, start_ms, end_ms, event_type, track_id, jersey_candidate, confidence, evidence_uri, clip_uri, verified, origin`. Track/jersey/URIs may be null. `origin`: `model | coach_annotation | fixture`. Event verification requires evidence; it does not imply verified athlete identity.

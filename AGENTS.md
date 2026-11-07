@@ -2,8 +2,12 @@
 
 ## Goal and source of truth
 
-Build the first working local basketball video prototype fast. Product name is provisional; repository name is `yc-naive-hackathon`.
+Build a sports video intelligence platform, with basketball as the first working local prototype. Product name is provisional; repository name is `yc-naive-hackathon`.
 Requirements: [YC Naive Hackathon brainstorming](https://docs.google.com/document/d/1kEtq_jr14fybmyRyH_d0h5GALDyeX0YExyt-AdtnJrM/edit), especially “Implementation Order — Local Core → Naive SDK → Sponsors (Authoritative)”. See `docs/PROTOTYPE_PLAN.md` and `docs/API_CONTRACT.md` for the implementation baseline. These are proposed interfaces, not existing functionality.
+
+## Sports scope
+
+Keep ingest, tracking records, clipping, jobs, consent and UI infrastructure reusable across sports. Carry `sport` on each game and worker options; use `basketball` for the first prototype. Keep sport-specific event vocabulary, court geometry and analysis rules in a small sport configuration/module rather than shared pipeline code. Implement only basketball now; add other sports after the first prototype works. Do not build a generalized plugin framework upfront or claim unvalidated sports support.
 
 ## Build order
 

@@ -2,6 +2,10 @@
 
 Source: [planning doc](https://docs.google.com/document/d/1kEtq_jr14fybmyRyH_d0h5GALDyeX0YExyt-AdtnJrM/edit), read 2026-11-07. The final implementation-order section supersedes earlier cloud-first schedules.
 
+## Product scope
+
+The product serves sports in general. Basketball is the initial implementation and acceptance target. Reuse the video/job/clip/profile pipeline; isolate event vocabulary and court assumptions in basketball configuration. Expansion to other sports follows validation of the first prototype.
+
 ## Start together, then separate
 
 Integration lead first bootstraps Python/FastAPI/SQLite and React/Vite/TypeScript, commits canonical models and one JSON fixture, and records exact setup commands. Check Python, Node, FFmpeg/ffprobe and CPU/GPU support; choose and pin compatible dependencies. No SDK or GPU is assumed installed. Acquire one rights-cleared basketball MP4 and 2–3 explicitly supplied roster identifiers. If footage is unavailable, proceed with fixture UI and synthetic plumbing tests, and report real CV validation as blocked.
