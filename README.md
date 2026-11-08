@@ -2,13 +2,40 @@
 
 # PlayLattice
 
-Turn basketball footage into a film room with player tracking, ball and hoop observations, reviewable basketball stats, and source-linked highlight clips.
+**Autonomous sports clipping.** Turn basketball footage into source-linked highlights and portrait prediction quizzes that invite viewers to guess before the reveal.
 
-PlayLattice is being built for the YC Naive Hackathon. The local video workflow works today; Naive SDK onboarding is set up with a capped agent and spending checks; connecting its tools to the local worker is next, followed by sponsor integrations. Basketball is the first supported sport.
+PlayLattice combines local video models, a coordinated Naive crew, and AgentMail customer conversations. Review the evidence in the Film Room, inspect agent activity in the Naive Crew dashboard, and request clip previews by email. Basketball is the first supported sport; the project was built for the YC Naive Hackathon.
 
-![PlayLattice dashboard: basketball replay with tracking overlays, player highlight cards, and clip review](docs/assets/dashboard.gif)
+**[Project website](https://playlattice-project.doublename.chatgpt.site)** · **[Watch the demo](https://playlattice-project.doublename.chatgpt.site/#demo)** · [Architecture](https://playlattice-project.doublename.chatgpt.site/architecture.html) · [Email for recommendations](mailto:playlattice@agentmail.to)
 
-*Recorded from the running app with real model predictions on the TrackID3x3 outdoor sample. Player labels are provisional; highlighted activity is not a verified basketball outcome. Footage: Kazuhiro Yamada et al., [TrackID3x3](https://github.com/open-starlab/TrackID3x3), CC BY 4.0; excerpted, resized and overlaid. [Capture details](docs/assets/README.md).*
+## See it in action
+
+### Film Room
+
+Replay with tracking and ball/hoop overlays, inspect the player table, review candidate moments, and open rendered clips.
+
+![Film Room walkthrough showing basketball replay with model overlays, player highlights, candidate review, and rendered clips](docs/assets/film-room.gif)
+
+*Recorded from the running app using existing analysis of the TrackID3x3 outdoor sample. Track labels and model observations are provisional. This is a UI walkthrough, not an inference-speed benchmark. Footage: Kazuhiro Yamada et al., [TrackID3x3](https://github.com/open-starlab/TrackID3x3), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); excerpted, resized, and overlaid.*
+
+### Naive Crew dashboard
+
+Follow the batch’s recorded outcomes, inspect workflow stages and agent activity, and check the AgentMail / outreach worker in one place.
+
+![Naive Crew walkthrough showing the batch overview, AgentMail and outreach status, workflow stages, agent activity table, and video outcomes](docs/assets/naive-crew.gif)
+
+*Actual persisted workflow and worker state at capture time. The batch is cancelled and posting is off; historical completed sessions are labeled as such. No jobs, messages, or social posts were created for this recording.*
+
+<details>
+<summary><strong>Portrait quiz example</strong> — a previously published TikTok format</summary>
+
+![Recorded portrait quiz showing player highlights, answer choices, countdown, and reveal](docs/html/assets/tiktok-quiz-preview.gif)
+
+*This earlier format asks viewers to predict player movement. The [current demo](https://playlattice-project.doublename.chatgpt.site/#demo) shows the newer storytelling format; the website’s make-or-miss interaction is a labeled illustration. [Original TikTok post](https://www.tiktok.com/@playlatticeai/video/7705723023252376845). Source: Singpore amatuer basketball channel, [original footage](https://www.youtube.com/watch?v=zpT8lc2vtkQ), excerpted, cropped, and overlaid with quiz graphics.*
+
+</details>
+
+[Recording details and attribution](docs/assets/README.md).
 
 **Phase 1 complete:** authorized input → unattended local analysis → playable clip outputs, with optional cancellation. [Acceptance evidence](docs/PHASE1_ACCEPTANCE.md).
 
@@ -22,11 +49,13 @@ The film room uses tabs for playback, players/highlights, camera shots, ball/hoo
 - **Generate player highlights.** Rank candidate footage by editorial highlight priority, render clips, seek back to the original video, and review the suggested plays. Clip exports are checked for decoding, source bounds, duration and first-frame alignment.
 - **Build evidence-backed stats.** Confirm the actor, event time and basketball outcome before an event contributes to a player's totals. Unknown shot values and uncertain or duplicate events remain unresolved. Totals cover reviewed evidence only.
 - **Handle camera changes.** Detect hard cuts, reset tracking across camera boundaries, and keep generated clips within a shot. Review provisional gameplay classifications and export individual shots.
+- **Inspect the Naive crew.** View source checks, clip/caption handoffs, bounded session activity, batch cancellation, publishing state, and recorded costs. Metadata-only agent output is labeled rather than treated as visual verification.
+- **Request clips by email.** AgentMail receives requests at [playlattice@agentmail.to](mailto:playlattice@agentmail.to). Naive’s **outreach** agent recommends existing TikTok posts and asks clarifying questions; local code validates source times and player-track selections before rendering a preview. [Worker setup](integrations/agentmail/README.md).
 - **Process portrait footage.** A 9:16 crop has passed the complete analysis and clip-export flow. A narrow frame can lose players, the ball and surrounding play.
 
 Jobs, review state and replayable updates persist in SQLite. Uploaded media, model weights and generated videos remain in ignored local storage.
 
-[Watch the two-minute demo](docs/html/index.html#demo) · [Documentation index](docs/README.md) · [Architecture](docs/html/architecture.html)
+[Watch the two-minute demo](https://playlattice-project.doublename.chatgpt.site/#demo) · [Documentation index](docs/README.md) · [Architecture](https://playlattice-project.doublename.chatgpt.site/architecture.html)
 
 ## Run locally
 
@@ -73,7 +102,7 @@ For frontend development, run `npm --prefix frontend run dev` alongside the API.
 | Component | Active implementation |
 | --- | --- |
 | Player detection and pose | Pinned Ultralytics YOLO26n-pose; 17 keypoints; default stride 5 |
-| Ball and hoop detection | Basketball-trained E-BARD RF-DETR Nano; default stride 2 |
+| Ball and hoop detection | Basketball-trained E-BARD RF-DETR Nano; default stride 3 |
 | Identity and continuity | Conservative tracking and anonymous grouping, with reviewer corrections |
 | Highlights | Visual-activity heuristics and reviewer-confirmed outcomes, rendered with FFmpeg |
 | Storage and UI | FastAPI, SQLite, React, TypeScript and Vite |
@@ -82,7 +111,7 @@ This is sampled video analysis, not demonstrated real-time game coverage. Model 
 
 We benchmarked basketball-trained YOLOv8n against RF-DETR on the same 264 frames and three-view settings on MPS. YOLO took 9.2 seconds versus RF-DETR's 62.5 seconds, but detected balls in only 39 frames versus 164 and hoops in zero frames versus 264. These are **detection coverage and detector timings, not accuracy or full-job latency**. RF-DETR remains active. Adaptive crop and cross-frame batching experiments are archived and are not enabled in production analysis. [Benchmark details](docs/EBARD_MODEL_BENCHMARK.md).
 
-Player scores express clip-review priority, not player ability. Official statistics, verified rosters, private athlete profiles, automatic jersey identification, recruiting workflows, full Naive tool orchestration and sponsor plugins are not implemented.
+Player scores express clip-review priority, not player ability. Official statistics, verified rosters, private athlete profiles, automatic jersey identification, recruiting workflows and generalized sponsor plugins are not implemented. Naive crew and AgentMail integration are implemented, but a completed metadata-only session does not establish visual understanding of a play.
 
 ## Checks
 
@@ -92,7 +121,7 @@ Player scores express clip-review priority, not player ability. Official statist
 npm --prefix frontend run build
 ```
 
-The current backend suite has 196 passing tests. UI readability was checked in desktop and mobile Chrome. Real-video inference and export checks are separate from unit tests; passing software checks does not establish basketball recognition accuracy.
+The latest local verification passed 242 backend tests, 63 Naive integration tests, the integration typecheck, and the frontend build. UI readability was checked in desktop and mobile Chrome. Real-video inference and export checks are separate from unit tests; passing software checks does not establish basketball recognition accuracy.
 
 ## Further reading
 
