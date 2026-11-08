@@ -19,7 +19,7 @@ for (const tab of tabs) {
     if (next !== null) {event.preventDefault();selectSection(tabs[next].getAttribute('aria-controls'), true);history.replaceState(null, '', '#' + tabs[next].getAttribute('aria-controls'));}
   });
 }
-for (const link of nav) link.addEventListener('click', event => {event.preventDefault();selectSection(link.dataset.section);history.replaceState(null, '', '#' + link.dataset.section);});
+for (const link of nav) link.addEventListener('click', event => {event.preventDefault();selectSection(link.dataset.section);history.replaceState(null, '', '#' + link.dataset.section);document.getElementById(link.dataset.section).scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'start'});});
 window.addEventListener('hashchange', () => selectSection(location.hash.slice(1)));
 selectSection(location.hash.slice(1));
 const answers = [...document.querySelectorAll('[data-answer]')];

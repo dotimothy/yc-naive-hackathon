@@ -9,7 +9,7 @@ The app uses an existing Naive company crew: CEO/Coordinator, Scout, Clipper, Ca
 Start the configured local stack with `./run.sh` from the repository root. Fresh setup uses `./setup.sh`; private agent-version state and credentials are not committed. This command does not create a company, enable publishing, or activate email sending.
 
 - [Architecture](../../docs/html/architecture.html)
-- [Crew dashboard handoff](../../docs/NAIVE_TEAM_DASHBOARD_HANDOFF.md)
+- [Crew dashboard guide](../../docs/NAIVE_DASHBOARD.md)
 - [Daily discovery operation](../../docs/DAILY_AUTONOMOUS_VIDEO.md)
 - [AgentMail worker setup](../agentmail/README.md)
 

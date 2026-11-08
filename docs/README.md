@@ -8,7 +8,7 @@ Start with the root [README](../README.md) and run `./setup.sh`, then `./run.sh`
 - [Handoff](HANDOFF.md): implementation entry points, API, evidence, and limitations.
 - [API contract](API_CONTRACT.md): video ingestion and analysis interfaces.
 - [Daily autonomous videos](DAILY_AUTONOMOUS_VIDEO.md): five-video target, scheduling, budgets, and outputs.
-- [Naive dashboard](NAIVE_TEAM_DASHBOARD_HANDOFF.md): workflow stages and activity.
+- [Naive dashboard](NAIVE_DASHBOARD.md): workflow stages and activity.
 - [AgentMail intake](../integrations/agentmail/README.md): authenticated inbound mail worker and clip previews.
 - [Project website](html/README.md): static hosting and the finished two-minute demo.
 

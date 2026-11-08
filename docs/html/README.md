@@ -24,7 +24,7 @@ The page embeds the completed two-minute demo at `#demo`, with native playback c
 
 The page uses the app’s bundled Barlow fonts and broadcast theme. `page.js` handles accessible tabs and a clearly labeled quiz interaction example. Motion honors the system preference; the recorded GIF has a still-image fallback.
 
-The dashboard GIF is the existing recorded app tour, not the new two-minute demo or the latest UI. Its underlying footage is TrackID3x3, CC BY 4.0. Attribution is visible on the page; capture and transformation details are in `docs/assets/README.md`. The decorative court is an inline SVG illustration, not model output.
+The dashboard GIF is the existing recorded app tour, not the new two-minute demo or the latest UI. Its underlying footage is TrackID3x3, CC BY 4.0. Attribution is visible on the page; capture and transformation details are in `docs/assets/README.md`. The quiz court illustration demonstrates the interaction format; it is not model output.
 
 ## Architecture page
 
