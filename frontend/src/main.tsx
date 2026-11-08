@@ -249,6 +249,7 @@ function GameRoom({ game }: { game: Game }) {
   const [showBoxes, setShowBoxes] = useState(true);
   const [showPose, setShowPose] = useState(true);
   const [showFootDot, setShowFootDot] = useState(true);
+  const [interpolate, setInterpolate] = useState(true);
   const [selectedTrack, setSelectedTrack] = useState<string | null>(null);
 
   const index = useMemo(() => buildFrameIndex(room.tracks), [room.tracks]);
@@ -324,11 +325,12 @@ function GameRoom({ game }: { game: Game }) {
 
       <div className="room-grid">
         <section className="panel film">
-          <FilmPlayer game={game} videoRef={videoRef} playheadMs={playheadMs} index={index} showBoxes={showBoxes} showPose={showPose} showFootDot={showFootDot} selectedTrack={selectedTrack} />
+          <FilmPlayer game={game} videoRef={videoRef} playheadMs={playheadMs} index={index} showBoxes={showBoxes} showPose={showPose} showFootDot={showFootDot} interpolate={interpolate} selectedTrack={selectedTrack} />
           <div className="controls">
             <label className="toggle"><input type="checkbox" checked={showBoxes} onChange={(e) => setShowBoxes(e.target.checked)} /> Boxes</label>
             <label className="toggle"><input type="checkbox" checked={showPose} onChange={(e) => setShowPose(e.target.checked)} /> Pose (COCO-17)</label>
             <label className="toggle"><input type="checkbox" checked={showFootDot} onChange={(e) => setShowFootDot(e.target.checked)} /> Foot dot</label>
+            <label className="toggle" title="Blend boxes/pose between model samples so they follow the video between sampled frames. Display smoothing only."><input type="checkbox" checked={interpolate} onChange={(e) => setInterpolate(e.target.checked)} /> Interpolate between samples</label>
             <label className="select">
               Track
               <select value={selectedTrack ?? ''} onChange={(e) => setSelectedTrack(e.target.value || null)} disabled={!index.trackIds.length}>
