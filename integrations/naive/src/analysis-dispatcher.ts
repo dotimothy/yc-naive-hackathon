@@ -51,7 +51,7 @@ const server=createServer(async(req,res)=>{
   if(req.method==='GET'&&url.pathname==='/health'){res.end(JSON.stringify({status:'ok',busy,publishing:false}));return;}
   if(req.method==='GET'&&url.pathname==='/workflows'){res.end(JSON.stringify({items:store.all().filter(r=>r.state!=='baseline_skipped').map(({evidence,request,...r})=>r)}));return;}
   const match=url.pathname.match(/^\/workflows\/([a-zA-Z0-9_-]+)\/cancel$/);
-  if(req.method==='POST'&&match&&req.headers['x-playlattice-local']==='1'&&!req.headers.origin){const r=store.get(match[1]);if(!r){res.statusCode=404;res.end('{}');return;}if(['submitting','running','cancelling'].includes(r.state)){r.cancel_requested=true;store.save(r);}res.end(JSON.stringify({job_id:r.job_id,cancel_requested:r.cancel_requested||false}));return;}
+  if(req.method==='POST'&&match&&req.headers['x-playlattice-local']==='1'&&!req.headers.origin){const r=store.get(match[1]);if(!r){res.statusCode=404;res.end('{}');return;}if(['submitting','running','cancelling'].includes(r.state)){r.cancel_requested=true;store.save(r);}else if(r.state==='succeeded'&&r.publication&&!['posted','failed','blocked'].includes(r.publication.status)){r.publication.cancel_requested=true;store.save(r);}res.end(JSON.stringify({job_id:r.job_id,cancel_requested:r.cancel_requested||r.publication?.cancel_requested||false}));return;}
   res.statusCode=404;res.end('{}');
  }catch(e){res.statusCode=500;res.end(JSON.stringify(safeError(e)));}
 });

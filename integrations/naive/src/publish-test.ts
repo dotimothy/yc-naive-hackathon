@@ -5,6 +5,7 @@ import { setTimeout } from 'node:timers/promises';
 import { naiveClient,safeError } from './client.js';
 import { WorkflowStore } from './analysis-store.js';
 import { publicTikTokTestPost,selectTestWorkflow } from './publish-contract.js';
+import {prepareTikTokMedia,TIKTOK_PROFILE,frameRate} from './tiktok-media.js';
 const folder=fileURLToPath(new URL('../../../data/naive/',import.meta.url));
 const identity='idn_kyebzf0eg9myzy39dmf7vfrg07';
 const store=new WorkflowStore(folder+'analysis-workflows.sqlite3');
@@ -16,6 +17,8 @@ try {
  if(jobFlag>=0&&!requestedJob)throw new Error('--job requires an ID');
  const workflow=selectTestWorkflow(requestedJob?[store.get(requestedJob)].filter(Boolean):store.all());
  if(!workflow)throw new Error('No completed crew workflow with clips');
+ const assertActive=()=>{if(store.get(workflow.job_id)?.publication?.cancel_requested)throw new Error('Publication cancellation requested');};
+ assertActive();
  const selected=workflow.output.clips[0];
  publicTikTokTestPost('fil_preflight',selected,workflow.output.source_sha256);
  const current=await read(`/api/games/${encodeURIComponent(workflow.game_id)}/jobs`);
@@ -23,17 +26,23 @@ try {
  const clips=await read(`/api/games/${encodeURIComponent(workflow.game_id)}/clips`);
  const clip=clips.items.find((c:any)=>c.clip_id===selected.clip_id);
  if(!clip||clip.job_id!==workflow.job_id||clip.qa_status!=='passed'||!clip.decoded||clip.source_sha256!==workflow.output.source_sha256||clip.source_start_ms!==selected.source_start_ms||clip.source_end_ms!==selected.source_end_ms||!/^\/api\/media\/[a-zA-Z0-9_-]+$/.test(clip.uri))throw new Error('Clip provenance no longer matches');
- const key='playlattice-tiktok-public-v1-'+clip.clip_id;
- const file=folder+'publish-public-tiktok-'+clip.clip_id+'.json';
+ const response=await fetch(base+clip.uri,{redirect:'error',signal:AbortSignal.timeout(20000)});
+ if(!response.ok||Number(response.headers.get('content-length'))>10*1024*1024)throw new Error('Source media unavailable or oversized');
+ const sourceBytes=new Uint8Array(await response.arrayBuffer());if(sourceBytes.length>10*1024*1024)throw new Error('Source media exceeds test limit');
+ const prepared=await prepareTikTokMedia(sourceBytes,clip.sha256,folder+'publish-media');
+ console.log(JSON.stringify({event:'publishing_media_ready',profile:TIKTOK_PROFILE,input_fps:frameRate(prepared.recipe.input_metadata.streams.find((s:any)=>s.codec_type==='video')?.avg_frame_rate),output_fps:frameRate(prepared.metadata.streams.find(s=>s.codec_type==='video')?.avg_frame_rate),sha256:prepared.sha256}));
+ if(!process.argv.includes('--prepare-only')) {
+ const key='playlattice-tiktok-public-30fps-v1-'+clip.clip_id;
+ const file=folder+'publish-public-tiktok-30fps-v1-'+clip.clip_id+'.json';
  let state:any;
  try{state=JSON.parse(await readFile(file,'utf8'));}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;}
- state ||= {key,created_ms:Date.now(),job_id:workflow.job_id,clip_id:clip.clip_id,identity,visibility:'public',platform:'tiktok',source_sha256:clip.source_sha256,media_sha256:clip.sha256};
+ state ||= {key,created_ms:Date.now(),job_id:workflow.job_id,clip_id:clip.clip_id,identity,visibility:'public',platform:'tiktok',source_sha256:clip.source_sha256,media_sha256:prepared.sha256,source_clip_sha256:clip.sha256,media_profile:TIKTOK_PROFILE};
  const save=async()=>{await writeFile(file+'.tmp',JSON.stringify(state,null,2),{mode:0o600});await rename(file+'.tmp',file);};
  if(!state.file_id) {
   for(const filename of await readdir(folder)) {
    if(!/^publish-(?:test|private-tiktok|public-tiktok)-.*\.json$/.test(filename))continue;
    const prior=JSON.parse(await readFile(folder+filename,'utf8'));
-   if(prior.file_id&&prior.media_sha256===clip.sha256&&prior.source_sha256===clip.source_sha256&&!prior.cleanup?.deleted){state.file_id=prior.file_id;break;}
+   if(prior.file_id&&prior.media_sha256===prepared.sha256&&prior.source_sha256===clip.source_sha256&&!prior.cleanup?.deleted){state.file_id=prior.file_id;break;}
   }
  }
  const client=naiveClient(key);
@@ -48,18 +57,14 @@ try {
   const name=`${key}.mp4`;
   const existing=state.upload_attempted?await client.files.list({search:name,scope:'published',limit:100}):null;
   if(existing?.has_more)throw new Error('File reconciliation incomplete');
-  const known=existing?.data.find(f=>f.name===name&&f.sha256===clip.sha256);
+  const known=existing?.data.find(f=>f.name===name&&f.sha256===prepared.sha256);
   if(known)state.file_id=known.id;
   else {
    if(state.upload_attempted)throw new Error('Previous upload status unconfirmed; no second upload submitted');
-   const r=await fetch(base+clip.uri,{redirect:'error',signal:AbortSignal.timeout(20000)});
-   if(!r.ok)throw new Error(`Media HTTP ${r.status}`);
-   if(Number(r.headers.get('content-length'))>10*1024*1024)throw new Error('Test clip exceeds ten MiB');
-   const bytes=new Uint8Array(await r.arrayBuffer());
-   if(bytes.length>10*1024*1024||createHash('sha256').update(bytes).digest('hex')!==clip.sha256)throw new Error('Media hash or size mismatch');
+   const bytes=prepared.bytes;
    const form=new FormData();form.append('file',new Blob([bytes],{type:'video/mp4'}),name);form.append('scope','published');
-   state.upload_attempted=true;await save();
-   try{const uploaded=await naiveClient(key+'-upload').files.upload(form);if(uploaded.sha256!==clip.sha256)throw new Error('Uploaded media hash mismatch');state.file_id=uploaded.id;}
+   assertActive();state.upload_attempted=true;await save();
+   try{const uploaded=await naiveClient(key+'-upload').files.upload(form);if(uploaded.sha256!==prepared.sha256)throw new Error('Uploaded media hash mismatch');state.file_id=uploaded.id;}
    catch(e){if((e as any).status===429){state.upload_attempted=false;await save();}throw e;}
   }
   await save();console.log(JSON.stringify({event:'media_uploaded',file_id:state.file_id}));
@@ -68,14 +73,15 @@ try {
  if('visibility' in state.body||state.body.platforms.length!==1||state.body.platforms[0]!=='tiktok')throw new Error('Stored publication policy is not the authorized public TikTok request');
  await save();
  if(!state.post_id) {
-  const existing=state.post_attempted?await client.social.listPosts({identity_id:identity,limit:100,reconcile:true}):null;
+  const existing=await client.social.listPosts({identity_id:identity,limit:100,reconcile:true});
   if(existing?.has_more)throw new Error('Post reconciliation incomplete');
   const known=existing?.data.find(p=>p.file_ids.includes(state.file_id)&&p.platforms.length===1&&p.platforms[0]==='tiktok');
-  if(known)state.post_id=known.id;
+  if(known){const live=await client.social.getPost(identity,known.id);if(live.status==='failed'||live.status==='deleted')throw new Error('This prepared media already has a failed delivery; automatic repeat refused');state.post_id=known.id;}
   else {
    if(Date.now()-state.created_ms>23*60*60*1000)throw new Error('Post replay window expired; no new post submitted');
    const latest=await read(`/api/games/${encodeURIComponent(workflow.game_id)}/jobs`);
    if(latest.items.at(-1)?.job_id!==workflow.job_id||store.get(workflow.job_id)?.state!=='succeeded')throw new Error('Workflow changed before publication');
+   assertActive();store.reservePublication(workflow.job_id,TIKTOK_PROFILE);
    state.post_attempted=true;await save();
    const post=await client.social.createPost(identity,state.body);state.post_id=post.id;
   }
@@ -86,7 +92,7 @@ try {
   const live=await client.social.getPost(identity,state.post_id);
   if(live.status==='failed') {
    state.status='failed';state.provider_error=live.error||'Provider returned failed without an error reason';state.checked_at=new Date().toISOString();await save();
-   const record=store.get(workflow.job_id);record.publication={platform:'tiktok',requested_visibility:'public',post_id:state.post_id,status:'failed',error:state.provider_error};store.save(record);
+   const record=store.get(workflow.job_id);record.publication={...record.publication,profile:TIKTOK_PROFILE,platform:'tiktok',requested_visibility:'public',post_id:state.post_id,status:'failed',error:state.provider_error};store.save(record);
    throw new Error(state.provider_error);
   }
   if(live.status!=='posted'){state.status=live.status;await save();await setTimeout(5000);continue;}
@@ -100,6 +106,7 @@ try {
   }
   await setTimeout(5000);
  }
- if(state.status==='posted'&&state.url){const record=store.get(workflow.job_id);record.publication={platform:'tiktok',requested_visibility:'public',public_access_verified:state.public_access_verified||false,post_id:state.post_id,url:state.url,status:state.status};store.save(record);}
+ if(state.status==='posted'&&state.url){const record=store.get(workflow.job_id);record.publication={...record.publication,profile:TIKTOK_PROFILE,platform:'tiktok',requested_visibility:'public',public_access_verified:state.public_access_verified||false,post_id:state.post_id,url:state.url,status:state.status,error:null};store.save(record);}
  if(state.status!=='posted'||!state.url)throw new Error('Publishing still pending; rerun reconciles the original post');
+ }
 }catch(e){console.error(JSON.stringify(safeError(e)));process.exitCode=1;}finally{store.close();}

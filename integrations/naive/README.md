@@ -120,3 +120,19 @@ This narrow acceptance test takes one selected clip from a completed crew result
 Naive currently rejects `visibility` on TikTok. The operator explicitly authorized public testing after the private request was rejected, so this path omits that unsupported field and uses the account default. It does not send anything to YouTube. The historical unlisted/private payload helpers remain for contract tests; they are not the active publishing policy.
 
 Private `data/naive/publish-public-tiktok-*.json` journals retain upload/post IDs and stable request bodies. Reruns reconcile existing files/posts and use one post idempotency key. Once a post exists, live provider status is read directly: `failed` is terminal, and the lagging company ledger cannot turn it into a successful post. A successful post is checked for a permalink and public TikTok oEmbed access; the receipt distinguishes public access verification from requested visibility. This is an explicit test command, not a general automatic publisher for all sources.
+
+### Autonomous publishing and TikTok media preflight
+
+The operator authorized unattended public TikTok tests. All six crew roles were instructed with `npm run crew:autonomy`; one local publisher owns delivery so agents cannot race independent posts. Run `npm run publish:watch` alongside `npm run crew:watch`. The private `data/naive/publishing-policy.json` gates activation, source scope and any explicitly included existing jobs. New completed packages for the attributed indoor sample are processed without another Generate/Publish/Approve action. Unknown sources and terminal errors stop with machine-readable output.
+
+TikTok requires 23–60 FPS. The original indoor sample's 19.98 FPS clips need a publishing derivative: `tiktok-h264-30fps-v1` creates H.264/yuv420p + AAC at 30 FPS, preserves dimensions/timing, and verifies hash/probe/full decode. It duplicates frames without changing the video speed, and does not rerun inference or modify source/analysis artifacts. Cached derivatives are keyed by the original clip hash and immutable profile.
+
+Prepare and validate without contacting Naive or posting:
+
+```sh
+npm run publish:test -- --job JOB_ID --prepare-only
+```
+
+Prepared media use distinct upload/post journals so old low-FPS files are never silently reused. Existing posts are reconciled before creating another. New root tasks request $0.95; the publishing fee is transactionally reserved within the approved $1/video and monthly allocation. The queue suppresses terminal failures and waits for confirmed receipts; current activation is limited to the known attributed test source.
+
+The corrected clip has been publicly verified on [@playlatticeai](https://www.tiktok.com/@playlatticeai/video/7705703545487527182). See [workflow acceptance](../../docs/NAIVE_WORKFLOW_ACCEPTANCE.md) for measured results and remaining scope limits.

@@ -31,7 +31,7 @@ async function cancel(r:any,reason:string) {
 }
 async function submit(r:any) {
  if(Date.now()-r.created_ms>23*60*60*1000)throw new Error('Ambiguous submission exceeded safe idempotency replay window; retained reservation');
- r.request ||= {agent_id:crew.coordinator.id,agent_version:config.coordinator_version,budget_micro_usd:1_000_000,output_schema:packageSchema,structured_output_required:true,
+ r.request ||= {agent_id:crew.coordinator.id,agent_version:config.coordinator_version,budget_micro_usd:950_000,output_schema:packageSchema,structured_output_required:true,
   metadata:{playlattice_job_id:r.job_id,playlattice_workflow:r.key},
   message:'Run the local-analysis integration with all five pinned crew members. Use only supplied metadata; no video was inspected. All sends must use wait:true. Select only existing nonoverlapping QA-passed clips. Captions must describe generic basketball gameplay, never specific outcomes or player identities. Preserve uncertainty. Return the structured package using submit_output. Evidence: '+JSON.stringify(r.evidence),
  };
