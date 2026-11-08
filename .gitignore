@@ -33,3 +33,8 @@ data/
 
 # Published segmented demo initialization file
 !docs/html/assets/demo-stream/init.mp4
+
+# Cloudflare local development and deployment state
+.wrangler/
+.dev.vars
+.dev.vars.*

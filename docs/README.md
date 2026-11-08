@@ -10,6 +10,7 @@ Start with the root [README](../README.md) and run `./setup.sh`, then `./run.sh`
 - [Daily autonomous videos](DAILY_AUTONOMOUS_VIDEO.md): five-video target, scheduling, budgets, and outputs.
 - [Naive dashboard](NAIVE_DASHBOARD.md): workflow stages and activity.
 - [AgentMail intake](../integrations/agentmail/README.md): authenticated inbound mail worker and clip previews.
+- [Cloudflare Pages deployment](CLOUDFLARE_PAGES.md): account login and production deployment.
 - [Project website](html/README.md): static hosting and the finished two-minute demo.
 
 ## Model and media evidence

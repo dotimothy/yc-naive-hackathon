@@ -10,13 +10,13 @@ Preview from the repository root:
 
 Open http://127.0.0.1:8080. This does not start the analysis app. Use the repository preview server rather than `python -m http.server`: it supports HTTP byte ranges, which browsers need to seek reliably within the demo. Install the Python dependencies with `./setup.sh` first.
 
-## Publish later
+## Production hosting
 
-Nothing is published automatically by adding these files.
+Live Cloudflare Pages site: **https://playlattice-project.pages.dev/**.
 
-**Publish from a branch:** In repository Settings → Pages, choose Deploy from a branch, select the branch containing this page and the `/docs` folder. The page will be at `https://dotimothy.github.io/yc-naive-hackathon/html/` after publication. GitHub's branch-based folder choices are `/` and `/docs`; `/docs/html` is not a selectable publishing root.
+Deploy updates from the repository root with `./scripts/deploy_pages.sh` after authenticating with Wrangler. The Pages project uses `develop` as its production branch; this is a direct-upload project, so GitHub pushes alone do not publish it. See [Cloudflare deployment instructions](../CLOUDFLARE_PAGES.md).
 
-**Publish at the site's root:** Use a GitHub Pages Actions workflow that uploads `docs/html` with `actions/upload-pages-artifact`, then deploys it with `actions/deploy-pages`. Set Pages to GitHub Actions first. No deployment workflow is enabled by this change.
+The existing Sites URL remains available independently. Both hosts serve the static project website; the Film Room application and video-analysis services remain on the host Mac.
 
 ## Product demo
 
@@ -28,7 +28,7 @@ The dashboard GIF is the existing recorded app tour, not the new two-minute demo
 
 ## Architecture page
 
-`architecture.html` presents the current system map, video lifecycle, AgentMail → Naive outreach → validated source-clip preview branch, data/control boundaries, and the distinction between static GitHub Pages hosting and the live Mac app. Open `/architecture.html` on the same preview server.
+`architecture.html` presents the current system map, video lifecycle, AgentMail → Naive outreach → validated source-clip preview branch, data/control boundaries, and the distinction between static Cloudflare Pages hosting and the live Mac app. Open `/architecture.html` on the same preview server.
 
 ## TikTok visual fallback
 
