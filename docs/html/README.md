@@ -5,10 +5,10 @@ Static, self-contained project page. No backend, package installation, or build 
 Preview from the repository root:
 
 ```sh
-python3 -m http.server 8080 --bind 127.0.0.1 --directory docs/html
+.venv/bin/python scripts/serve_website.py --port 8080
 ```
 
-Open http://127.0.0.1:8080. This does not start the analysis app.
+Open http://127.0.0.1:8080. This does not start the analysis app. Use the repository preview server rather than `python -m http.server`: it supports HTTP byte ranges, which browsers need to seek reliably within the demo. Install the Python dependencies with `./setup.sh` first.
 
 ## Publish later
 
@@ -20,7 +20,7 @@ Nothing is published automatically by adding these files.
 
 ## Product demo
 
-The page embeds the completed two-minute demo at `#demo`, with native playback controls, a poster image, and a direct video link. `assets/playlattice-demo.mp4` is a compressed H.264/AAC web derivative of the current customer/Outreach cut. This is the one explicitly published video exception in `.gitignore`; source footage and other generated videos remain ignored. See `assets/DEMO.md` for provenance, checksums, and source credits.
+The page embeds the completed two-minute demo at `#demo`, with native playback controls, a poster image, segmented HLS for reliable seeking, and a direct MP4 link. Safari uses native HLS; supported Chrome/Firefox browsers use the bundled hls.js player. `assets/playlattice-demo.mp4` is a compressed H.264/AAC web derivative of the current customer/Outreach cut. This is the one explicitly published video exception in `.gitignore`; source footage and other generated videos remain ignored. See `assets/DEMO.md` for provenance, checksums, and source credits.
 
 The page uses the app’s bundled Barlow fonts and broadcast theme. `page.js` handles accessible tabs and a clearly labeled quiz interaction example. Motion honors the system preference; the recorded GIF has a still-image fallback.
 

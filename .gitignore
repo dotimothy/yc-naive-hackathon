@@ -30,3 +30,6 @@ data/
 # Local agent worktrees and the explicitly published website demo
 .claude/worktrees/
 !docs/html/assets/playlattice-demo.mp4
+
+# Published segmented demo initialization file
+!docs/html/assets/demo-stream/init.mp4

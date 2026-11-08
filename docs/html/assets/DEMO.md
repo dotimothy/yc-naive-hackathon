@@ -15,3 +15,9 @@ ffmpeg -i playlattice-launch-120s-customer.mp4 -c:v libx264 -preset fast -crf 26
 ```
 
 Source references retained from the capture workflow: [Basquete — Gustavo Serrate](https://commons.wikimedia.org/wiki/File:Basquete.webm), CC BY 3.0; [ČBF 3x3 — Honza Nový](https://commons.wikimedia.org/wiki/File:%C4%8CBF_3x3_Tour_22.6._%C3%9Ast%C3%AD_nad_Labem.webm), CC BY 3.0; [TrackID3x3 — Kazuhiro Yamada et al.](https://github.com/open-starlab/TrackID3x3), CC BY 4.0. The showcase records previously published posts on the PlayLattice account; their attribution remains visible in the content. Clip selection, reframing, overlays, timing, and music are transformations. No endorsement by footage creators, TikTok, or sponsors is implied.
+
+## Seekable website playback
+
+The embedded player uses `demo-stream/index.m3u8` and independent four-second fMP4 segments, with keyframes at most two seconds apart. Safari uses native HLS; other supported browsers use locally bundled hls.js. The direct MP4 remains available for opening/downloading and as a compatibility fallback. This avoids depending on HTTP byte-range handling by static Sites hosting, which returned HTTP 200/full media to a Range GET during diagnosis.
+
+The segmented derivative was encoded from the same full-quality customer/Outreach cut with H.264 CRF25, GOP60 at30fps, maxrate3M/bufsize6M, AAC128k, then packaged with FFmpeg `-c copy -hls_time 4 -hls_playlist_type vod -hls_flags independent_segments -hls_segment_type fmp4`. No content or timing edits were made.
