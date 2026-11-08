@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {unlistedTestPost,indoorSourceHash,selectTestWorkflow} from './publish-contract.js';
+import {unlistedTestPost,indoorSourceHash,selectTestWorkflow,privateTikTokTestPost,publicTikTokTestPost} from './publish-contract.js';
 const clip={clip_id:'clip',shot_id:'0',source_start_ms:1003,source_end_ms:8256,identity_verified:false as const};
 test('test publication forces YouTube unlisted and attributed grounded captions',()=>{
  const p=unlistedTestPost('fil_test',clip,indoorSourceHash);
@@ -15,4 +15,14 @@ test('newer completed performance work cannot replace the attributed test source
  const newer={state:'succeeded',output:{source_sha256:'different-source',clips:[clip]}};
  assert.equal(selectTestWorkflow([newer,intended]),intended);
  assert.equal(selectTestWorkflow([newer]),undefined);
+});
+
+test('private TikTok capability test always sends explicit private visibility',()=>{
+ const p=privateTikTokTestPost('fil_test',clip,indoorSourceHash);
+ assert.deepEqual(p.platforms,['tiktok']);assert.equal(p.visibility,'private');assert.match(p.content,/CC BY 4.0/);
+});
+
+test('authorized public TikTok request excludes unsupported visibility and other platforms',()=>{
+ const p=publicTikTokTestPost('fil_test',clip,indoorSourceHash);
+ assert.deepEqual(p.platforms,['tiktok']);assert.equal('visibility' in p,false);assert.match(p.content,/CC BY 4.0/);
 });

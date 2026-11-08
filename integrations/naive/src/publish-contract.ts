@@ -13,3 +13,15 @@ export function unlistedTestPost(fileId:string, clip:ClipEvidence, sourceHash:st
 export function selectTestWorkflow(workflows:any[]) {
  return workflows.find(r=>r.state==='succeeded'&&r.output?.source_sha256===indoorSourceHash&&Array.isArray(r.output.clips)&&r.output.clips.length>0);
 }
+
+/** Private capability-test payload. A rejection must never silently remove privacy. */
+export function privateTikTokTestPost(fileId:string,clip:ClipEvidence,sourceHash:string):SocialPostCreate {
+ const attributed=unlistedTestPost(fileId,clip,sourceHash);
+ return {...attributed,platforms:['tiktok'],visibility:'private'};
+}
+
+/** Explicit operator authorization: public TikTok. Naive rejects its visibility field for TikTok. */
+export function publicTikTokTestPost(fileId:string,clip:ClipEvidence,sourceHash:string):SocialPostCreate {
+ const {visibility,...post}=privateTikTokTestPost(fileId,clip,sourceHash);
+ return post;
+}

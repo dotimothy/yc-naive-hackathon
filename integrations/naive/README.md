@@ -105,14 +105,18 @@ The sidecar listens on **127.0.0.1:8011**:
 
 Cancelling/superseding the local analysis is also detected. The existing UI's CV cancel button does not yet control agent work after CV completes; use the sidecar cancellation route for this stage. Keep the dispatcher process running for automatic completion handoffs; stopping it preserves queued/running work for restart.
 
-### Unlisted publication test
+### TikTok publication test
 
-The operator authorized automatic **unlisted-only** publication. Run:
+Current operator authorization is **TikTok only, public for testing**. Run:
 
 ```sh
 npm run publish:test
+# Pin an exact completed analysis:
+npm run publish:test -- --job JOB_ID
 ```
 
-This narrow acceptance test takes one selected clip from a completed crew result for the pinned indoor TrackID3x3 sample. It verifies current analysis/clip provenance and the media hash, requires exactly one connected YouTube account, uploads the MP4, posts with explicit `visibility: unlisted`, and reconciles its status and URL. TikTok is excluded. Captions contain only grounded duration/uncertainty and the source's CC BY 4.0 credit. No inference or extra agent sessions are started.
+This narrow acceptance test takes one selected clip from a completed crew result for the pinned indoor TrackID3x3 sample. It verifies current source/clip provenance and media hashes, requires exactly one connected TikTok account, reuses an uploaded file with the same source/media hashes or uploads the MP4, and submits to TikTok only. Captions contain grounded duration/uncertainty and CC BY 4.0 credit. No inference or extra agent sessions are started.
 
-Private `data/naive/publish-test-*.json` journals retain upload/post IDs and stable request bodies. Reruns reconcile existing files/posts, and post creation reuses one idempotency key; ambiguous uploads are reconciled rather than blindly repeated. A post with a reported visibility mismatch is removed. A pending or failed provider response is not reported as successful publication. This is an explicit test command, not a general automatic publisher for all uploaded sources.
+Naive currently rejects `visibility` on TikTok. The operator explicitly authorized public testing after the private request was rejected, so this path omits that unsupported field and uses the account default. It does not send anything to YouTube. The historical unlisted/private payload helpers remain for contract tests; they are not the active publishing policy.
+
+Private `data/naive/publish-public-tiktok-*.json` journals retain upload/post IDs and stable request bodies. Reruns reconcile existing files/posts and use one post idempotency key. Once a post exists, live provider status is read directly: `failed` is terminal, and the lagging company ledger cannot turn it into a successful post. A successful post is checked for a permalink and public TikTok oEmbed access; the receipt distinguishes public access verification from requested visibility. This is an explicit test command, not a general automatic publisher for all sources.
