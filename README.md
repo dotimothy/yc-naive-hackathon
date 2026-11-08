@@ -79,6 +79,7 @@ The current backend suite has 196 passing tests. UI readability was checked in d
 
 ## Further reading
 
+- [Detailed Naive integration and company-team plan](docs/NAIVE_INTEGRATION_PLAN.md)
 - [Naive SDK setup, approved budgets and monitoring](integrations/naive/README.md)
 
 - [Autonomous Phase 1 acceptance](docs/PHASE1_ACCEPTANCE.md)

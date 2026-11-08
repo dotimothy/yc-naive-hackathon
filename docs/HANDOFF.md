@@ -6,6 +6,10 @@ Updated 2026-11-07. Implementation baseline: `develop` at `d6f247a` (Title Case 
 
 The user’s latest scope is input → unattended processing → outputs, with optional cancellation and no intervening approvals. This local Phase 1 is complete: upload/sample input now durably starts analysis and automatic clip rendering. Profiles, roster verification and outreach are deferred from this milestone. See [Phase 1 acceptance](PHASE1_ACCEPTANCE.md) for real-video MPS/CPU runs, retry/cancellation/restart evidence and 196 passing tests. This update supersedes older Phase 1 profile requirements below; all model-quality caveats remain. Naive integration is next.
 
+## Integration plan
+
+See [the detailed Naive integration plan](NAIVE_INTEGRATION_PLAN.md) for the proposed coordinator/curator/verifier team, scoped tools, clip-plan rendering, budgets, cancellation and acceptance gates. It is a draft; no team expansion or bridge deployment has been applied.
+
 ## Naive onboarding update
 
 The SDK/CLI now live in `integrations/naive`. An operator-approved agent is provisioned with $10/month and $1/task caps; the real metadata smoke cost $0.00051. A read-only local spending watcher is available. No PlayLattice MCP tools or remote GPU bridge are connected yet. See [integration setup](../integrations/naive/README.md), including rate-limit/transport observations, credential rotation and local monitor lifetime. This supersedes older statements that no Naive resource exists; Phase 1 remains unchanged.
