@@ -118,10 +118,11 @@ type PlayerProps = {
   index: FrameIndex;
   showBoxes: boolean;
   showPose: boolean;
+  showFootDot: boolean;
   selectedTrack: string | null;
 };
 
-export function FilmPlayer({ game, videoRef, playheadMs, index, showBoxes, showPose, selectedTrack }: PlayerProps) {
+export function FilmPlayer({ game, videoRef, playheadMs, index, showBoxes, showPose, showFootDot, selectedTrack }: PlayerProps) {
   const [videoError, setVideoError] = useState<string | null>(null);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const W = game.width || natural?.w || 16;
@@ -176,6 +177,10 @@ export function FilmPlayer({ game, videoRef, playheadMs, index, showBoxes, showP
                       k.visibility > 0 ? <circle key={k.name} cx={k.x * W} cy={k.y * H} r={H * 0.004} fill="#fff" stroke={color} strokeWidth={1.5} vectorEffect="non-scaling-stroke" /> : null,
                     )}
                   </>
+                )}
+                {showFootDot && (
+                  // Ground point: bottom-center of the box, roughly where the player stands.
+                  <circle cx={(x + w / 2) * W} cy={(y + h) * H} r={H * 0.007} fill={color} stroke="#0b0d10" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
                 )}
               </g>
             );
