@@ -30,3 +30,9 @@ Private ignored state/logs:
 - Next successful source (LOW-004): https://www.tiktok.com/@playlatticeai/video/7705722419830377742
 
 The live dashboard was checked against the actual 111-item queue in isolated Chrome with no browser exceptions. Integration typecheck, 40 TypeScript tests, 9 Python renderer/music tests and frontend production build passed during this change.
+
+## Upstream provider outage recovery
+
+At 01:26 Pacific, post creation returned `501 feature_not_configured`: "the social provider rejected our key". The TikTok account inventory still showed the connected account. Seven additional batch videos had posted before the outage; later uploaded files and exact post request journals were retained. Publishing and the source queue were paused to avoid unnecessary uploads.
+
+`src/provider-recovery.ts` runs a bounded five-minute retry of one saved post request, using its exact idempotency key and body. It stops at the existing overnight deadline. If creation succeeds, it saves the returned post ID, restores safely resumable requests without touching terminal provider failures/cancellations, and restarts the queue. It never reuploads the files or increases spending limits. Private status: `data/naive/provider-recovery-status.json`; log: `provider-recovery.log`. Stop the PID in `provider-recovery.lock` to prevent automatic resumption. Successful recovery cannot be validated until Naive repairs its provider configuration.
