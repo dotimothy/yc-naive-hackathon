@@ -1,10 +1,12 @@
 import { StrictMode, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
-import { api, ApiError } from './api';
+import { api, ApiError, request } from './api';
 import { buildFrameIndex, FilmPlayer, formatMs, Timeline, trackColor, usePlayhead } from './FilmPlayer';
 import { EVENT_TYPE_LABEL, HighlightsPanel } from './HighlightsPanel';
+import { BasketballPanel, type BallObject } from './BasketballPanel';
+import { LiveBoard } from './LiveBoard';
 import type { Clip, Game, GameEvent, Job } from './types';
-import { isTerminal, useGameRoom, type DelayStats, type StreamState } from './useGameRoom';
+import { isTerminal, useGameRoom, type DelayStats } from './useGameRoom';
 import './styles.css';
 
 const errorText = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback);
@@ -41,15 +43,16 @@ function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <span className="logo" aria-hidden="true">◉</span>
+          <BallMark />
           <div>
-            <h1>ScoutFilm</h1>
-            <p>Local Film Room</p>
+            <h1>PlayLattice</h1>
+            <p>Film Room</p>
           </div>
         </div>
         <div className="topbar-meta">
-          <span className="pill">Basketball · prototype</span>
-          <span className="pill muted">Loopback only · no uploads leave this machine</span>
+          <span className="pill sport">Basketball</span>
+          <span className="pill">Prototype</span>
+          <span className="pill muted">Loopback Only · Footage Stays On This Machine</span>
         </div>
       </header>
       <div className="layout">
@@ -57,7 +60,7 @@ function App() {
           <IngestPanel onGame={addGame} />
           <section className="panel">
             <div className="panel-head">
-              <h2>Games</h2>
+              <h2>Game Library</h2>
               <button className="ghost small" onClick={() => void loadGames()}>Refresh</button>
             </div>
             {listError && (
@@ -91,7 +94,9 @@ function App() {
             <GameRoom key={selected.game_id} game={selected} />
           ) : (
             <div className="empty">
-              <h2>No game selected</h2>
+              <CourtArt />
+              <span className="empty-kicker">Tip-Off</span>
+              <h2>No Game Selected</h2>
               <p>Upload basketball footage you are authorized to use, or load the TrackID3x3 sample, then run analysis to see real model detections and pose.</p>
             </div>
           )}
@@ -144,7 +149,7 @@ function IngestPanel({ onGame }: { onGame: (g: Game) => void }) {
 
   return (
     <section className="panel">
-      <h2>Add footage</h2>
+      <h2>Add Footage</h2>
       <form onSubmit={submit} className="ingest">
         <label className="file">
           <input ref={inputRef} type="file" accept="video/mp4,.mp4" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
@@ -155,30 +160,28 @@ function IngestPanel({ onGame }: { onGame: (g: Game) => void }) {
           <span>I own this footage or am authorized to analyze it locally.</span>
         </label>
         <button type="submit" disabled={!file || !rights || busy !== null}>
-          {busy === 'upload' ? (progress !== null && progress < 1 ? `Uploading ${Math.round(progress * 100)}%` : 'Probing video…') : 'Upload game'}
+          {busy === 'upload' ? (progress !== null && progress < 1 ? `Uploading ${Math.round(progress * 100)}%` : 'Probing Video…') : 'Upload Game'}
         </button>
         {file && !rights && <p className="muted small">Confirm footage rights to enable upload.</p>}
       </form>
       <div className="divider"><span>or</span></div>
       <button className="secondary" onClick={() => void sample()} disabled={busy !== null}>
-        {busy === 'sample' ? 'Loading sample…' : 'Load TrackID3x3 sample'}
+        {busy === 'sample' ? 'Loading Sample…' : 'Load TrackID3x3 Sample'}
       </button>
       {error && <div className="alert error">{error}</div>}
     </section>
   );
 }
 
-const STREAM_LABEL: Record<StreamState, string> = {
-  connecting: 'Connecting',
-  live: 'Live',
-  reconnecting: 'Reconnecting…',
-  closed: 'Stream closed',
-};
-
 function GameRoom({ game }: { game: Game }) {
   const room = useGameRoom(game.game_id);
   const videoRef = useRef<HTMLVideoElement>(null);
   const playheadMs = usePlayhead(videoRef);
+  const [correctionError, setCorrectionError] = useState('');
+  const [correcting, setCorrecting] = useState(false);
+  const [ballObjects, setBallObjects] = useState<BallObject[]>([]);
+  const [showObjects, setShowObjects] = useState(true);
+  const [highlightsRevision, setHighlightsRevision] = useState(0);
   const [showBoxes, setShowBoxes] = useState(true);
   const [showPose, setShowPose] = useState(true);
   const [selectedTrack, setSelectedTrack] = useState<string | null>(null);
@@ -211,31 +214,43 @@ function GameRoom({ game }: { game: Game }) {
     [seek],
   );
 
+  // Read on demand so the highlights panel does not re-render at playback rate.
+  const getPlayheadMs = useCallback(() => Math.round((videoRef.current?.currentTime ?? 0) * 1000), []);
+
   const { refresh } = room;
   const refreshRoom = useCallback(() => void refresh(), [refresh]);
+
+  const correctIdentity = async (undo = false) => {
+    setCorrecting(true); setCorrectionError('');
+    try {
+      const sample = [...room.tracks.values()].find(s => s.track_id === selectedTrack);
+      const sourceTrack = (sample as { source_track_id?: string } | undefined)?.source_track_id ?? selectedTrack;
+      await request(`/api/games/${game.game_id}/highlights/identity/splits`, undo ? { method: 'DELETE' } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ track_id: sourceTrack, split_ms: getPlayheadMs() }) });
+      setSelectedTrack(null); setHighlightsRevision(v => v + 1); await refresh();
+    } catch (e) { setCorrectionError((e as Error).message); }
+    finally { setCorrecting(false); }
+  };
 
   const job = room.activeJob;
   const active = !!job && !isTerminal(job);
 
   return (
     <div className="room">
-      <div className="room-head">
-        <div>
-          <h2>{game.title}</h2>
-          <p className="muted small">
-            {game.sport} · {game.width}×{game.height} · {Number(game.fps).toFixed(2)} fps · {formatMs(game.duration_ms)}
-            {game.codec ? ` · ${game.codec}` : ''} · <code title={game.game_id}>{game.game_id.slice(0, 8)}</code>
-          </p>
-        </div>
-        <div className="room-actions">
-          <span className={`stream ${room.streamState}`}>
-            <i /> Updates: {STREAM_LABEL[room.streamState]}
-          </span>
-          <button onClick={() => void room.startAnalysis()} disabled={room.starting || active || !room.loaded}>
-            {room.starting ? 'Submitting…' : active ? 'Analysis running' : job ? 'Re-run analysis' : 'Analyze footage'}
+      <LiveBoard refreshKey={highlightsRevision}
+        game={game}
+        job={job}
+        tracks={room.tracks}
+        clips={clips}
+        progress={room.progress}
+        streamState={room.streamState}
+        delay={room.delayStats}
+        onPick={(trackId, ms) => seekAndShow(ms, trackId)}
+        actions={
+          <button className="cta" onClick={() => void room.startAnalysis()} disabled={room.starting || active || !room.loaded}>
+            {room.starting ? 'Submitting…' : active ? 'Analysis Running' : job ? 'Re-Run Analysis' : 'Analyze Footage'}
           </button>
-        </div>
-      </div>
+        }
+      />
 
       {game.sample && (
         <p className="attribution small">
@@ -256,8 +271,9 @@ function GameRoom({ game }: { game: Game }) {
 
       <div className="room-grid">
         <section className="panel film">
-          <FilmPlayer game={game} videoRef={videoRef} playheadMs={playheadMs} index={index} showBoxes={showBoxes} showPose={showPose} selectedTrack={selectedTrack} />
+          <FilmPlayer game={game} videoRef={videoRef} playheadMs={playheadMs} index={index} showBoxes={showBoxes} showPose={showPose} selectedTrack={selectedTrack} objects={showObjects ? ballObjects : []} />
           <div className="controls">
+            <label className="toggle"><input type="checkbox" checked={showObjects} onChange={e => setShowObjects(e.target.checked)} /> Ball / hoop</label>
             <label className="toggle"><input type="checkbox" checked={showBoxes} onChange={(e) => setShowBoxes(e.target.checked)} /> Boxes</label>
             <label className="toggle"><input type="checkbox" checked={showPose} onChange={(e) => setShowPose(e.target.checked)} /> Pose (COCO-17)</label>
             <label className="select">
@@ -273,10 +289,17 @@ function GameRoom({ game }: { game: Game }) {
             </label>
             <span className="muted small playhead-readout">{formatMs(playheadMs)}</span>
           </div>
+          <div className="controls">
+            <button className="secondary small" disabled={!selectedTrack || active || correcting} onClick={() => void correctIdentity()}>Split selected track at playhead</button>
+            <button className="ghost small" disabled={active || correcting || !job} onClick={() => void correctIdentity(true)}>Undo identity splits</button>
+            <span className="fineprint">Select a track and seek to a swap. Splits snap to a sampled frame and clear saved player groups, reviews and highlight clips for this analysis.</span>
+          </div>
+          {correctionError && <div className="alert error">{correctionError}</div>}
           <Timeline durationMs={game.duration_ms} playheadMs={playheadMs} index={index} clips={clips} selectedTrack={selectedTrack} onSeek={seek} />
           <p className="fineprint">
             Boxes and keypoints are raw person-detector/pose predictions on sampled frames, shown at the nearest prior sample within 400 ms — never interpolated.
-            Player labels reconnect temporary track fragments using uniform appearance and motion; these associations can be wrong and remain provisional. Tracks can include referees or spectators. No names or jersey numbers are inferred.
+            New analysis keeps uncertain fragments separate; proposed reconnections require review. Player labels remain provisional. Tracks can include referees or spectators. No names or jersey numbers are inferred.
+            “A?/B?” tags are an anonymous colour grouping and “non-player?/role?” tags are review prompts (dashed box); neither is verified and nobody is hidden automatically.
             Keypoint dots show the model's visibility flag, not a calibrated confidence.
           </p>
         </section>
@@ -285,7 +308,7 @@ function GameRoom({ game }: { game: Game }) {
           <JobPanel job={room.activeJob} jobs={room.jobs} loaded={room.loaded} refreshing={room.refreshing} progress={room.progress} durationMs={game.duration_ms} sampleCount={room.tracks.size} trackCount={index.trackIds.length} delay={room.delayStats} ignored={room.ignored} />
           {index.trackIds.length > 0 && (
             <section className="panel">
-              <h3>Temporary tracks</h3>
+              <h3>Temporary Tracks</h3>
               <p className="muted small">Click to isolate. Counts are model samples, not players.</p>
               <div className="chips">
                 {index.trackIds.slice(0, 40).map((t) => (
@@ -300,7 +323,9 @@ function GameRoom({ game }: { game: Game }) {
         </div>
       </div>
 
-      <HighlightsPanel gameId={game.game_id} jobId={job?.job_id ?? null} analysisActive={active} onSeek={seekAndShow} onUpdated={refreshRoom} />
+      <BasketballPanel refreshKey={highlightsRevision} gameId={game.game_id} jobId={job?.job_id ?? null} analysisActive={active} tracks={index.trackIds} onSeek={seekAndShow} onObjects={setBallObjects} onImported={() => { setHighlightsRevision(v => v + 1); refreshRoom(); }} />
+
+      <HighlightsPanel identityMergeSuggestions={job?.report?.identity_merge_suggestions} refreshKey={highlightsRevision} gameId={game.game_id} jobId={job?.job_id ?? null} analysisActive={active} onSeek={seekAndShow} onUpdated={() => { refreshRoom(); setHighlightsRevision(v => v + 1); }} getPlayheadMs={getPlayheadMs} />
 
       <ClipsPanel clips={clips} events={events} job={job} onSeek={seek} />
 
@@ -335,13 +360,13 @@ function JobPanel(props: {
   return (
     <section className="panel">
       <div className="panel-head">
-        <h3>Analysis job</h3>
+        <h3>Analysis Job</h3>
         {props.refreshing && <span className="muted small">refreshing…</span>}
       </div>
       {!loaded && !job ? (
         <p className="muted small">Loading job history…</p>
       ) : !job ? (
-        <p className="muted small">No analysis yet. Click <b>Analyze footage</b> to run person detection, pose and tracking (stride 5, offline pass — not replay-paced).</p>
+        <p className="muted small">No analysis yet. Click <b>Analyze Footage</b> to run person detection, pose and tracking (stride 5, offline pass — not replay-paced).</p>
       ) : (
         <>
           <div className="job-line">
@@ -373,6 +398,7 @@ function JobPanel(props: {
               </>
             )}
           </dl>
+          {report && <TrackerReviewSummary report={report} />}
           {report?.model && (
             <p className="fineprint">
               Model <code>{report.model}</code>
@@ -380,7 +406,7 @@ function JobPanel(props: {
             </p>
           )}
           <div className="delay">
-            <h4>Update transport delay</h4>
+            <h4>Update Transport Delay</h4>
             {delay ? (
               <p>
                 last <b>{delay.last} ms</b> · median <b>{delay.median} ms</b> <span className="muted">over {delay.count} live updates</span>
@@ -393,7 +419,7 @@ function JobPanel(props: {
           {props.ignored > 0 && <p className="fineprint">Ignored {props.ignored} replayed updates from older jobs/attempts.</p>}
           {jobs.length > 1 && (
             <details className="history">
-              <summary>Job history ({jobs.length})</summary>
+              <summary>Job History ({jobs.length})</summary>
               <ol>
                 {jobs.map((j) => (
                   <li key={j.job_id}>
@@ -406,6 +432,25 @@ function JobPanel(props: {
         </>
       )}
     </section>
+  );
+}
+
+const countOf = (v: unknown): number | null =>
+  Array.isArray(v) ? v.length : v && typeof v === 'object' ? Object.keys(v).length : null;
+
+/** Optional tracker review metadata; shown as counts to review, never as facts. */
+function TrackerReviewSummary({ report }: { report: Job['report'] & object }) {
+  const roles = countOf(report.role_flags);
+  const merges = countOf(report.merge_proposals);
+  const summary = report.team_summary && typeof report.team_summary === 'object' ? report.team_summary : null;
+  const teamReason = summary && typeof summary.reason === 'string' ? summary.reason.replace(/_/g, ' ') : null;
+  if (roles === null && merges === null && !summary) return null;
+  return (
+    <p className="fineprint">
+      Tracker review prompts:{teamReason ? ` colour grouping — ${teamReason};` : ''}
+      {roles !== null ? ` ${roles} role flag${roles === 1 ? '' : 's'};` : ''}
+      {merges !== null ? ` ${merges} unconfirmed merge proposal${merges === 1 ? '' : 's'}.` : ''} Heuristic only; confirm in footage.
+    </p>
   );
 }
 
@@ -423,7 +468,7 @@ function clipDescription(c: Clip, ev: GameEvent | undefined): string {
   if (c.kind === 'highlight') {
     const base =
       ev?.origin === 'reviewer_confirmed' && ev.event_type !== 'visual_activity'
-        ? `Reviewer-confirmed: ${eventTypeText(ev.event_type)} (not an official stat)`
+        ? `Reviewer-approved: ${eventTypeText(ev.event_type)} (not an official stat)`
         : c.review_status === 'approved'
         ? 'Reviewer-approved visual activity · no outcome claimed'
         : 'Provisional visual activity · heuristic highlight pick, unverified';
@@ -457,7 +502,7 @@ function ClipsPanel({ clips, events, job, onSeek }: { clips: Clip[]; events: Rec
                 <div className="clip-body">
                   <div className="clip-title">
                     <strong>
-                      {highlight ? 'Highlight pick' : `Clip ${i + 1}`}
+                      {highlight ? 'Highlight Pick' : `Clip ${i + 1}`}
                       {c.track_id ? <code className="clip-track"> T{c.track_id}</code> : null}
                     </strong>
                     <span className={`qa ${c.qa_status === 'passed' ? 'ok' : 'bad'}`}>QA {c.qa_status}</span>
@@ -472,15 +517,15 @@ function ClipsPanel({ clips, events, job, onSeek }: { clips: Clip[]; events: Rec
                   )}
                   {highlight && typeof c.highlight_score === 'number' && Number.isFinite(c.highlight_score) && (
                     <p className="small">
-                      Highlight priority <b>{Math.round(c.highlight_score)}</b>/100 <span className="muted">· footage-review order, not a talent rating</span>
+                      Clip priority <b>{Math.round(c.highlight_score)}</b>/100 <span className="muted">· editorial footage order, not basketball performance</span>
                     </p>
                   )}
                   <p className="fineprint">
                     {clipDescription(c, ev)} · {c.identity_verified ? 'identity verified' : 'identity unverified'}
                   </p>
                   <div className="clip-actions">
-                    <button className="secondary small" onClick={() => onSeek(c.source_start_ms)}>Seek source</button>
-                    <a href={c.uri} target="_blank" rel="noreferrer">Open clip ↗</a>
+                    <button className="secondary small" onClick={() => onSeek(c.source_start_ms)}>Seek Source</button>
+                    <a href={c.uri} target="_blank" rel="noreferrer">Open Clip ↗</a>
                   </div>
                 </div>
               </article>
@@ -489,6 +534,38 @@ function ClipsPanel({ clips, events, job, onSeek }: { clips: Clip[]; events: Rec
         </div>
       )}
     </section>
+  );
+}
+
+function BallMark() {
+  return (
+    <svg className="logo" viewBox="0 0 32 32" aria-hidden="true">
+      <circle cx="16" cy="16" r="14" fill="var(--accent)" />
+      <g fill="none" stroke="#1a0a00" strokeWidth="1.6">
+        <circle cx="16" cy="16" r="14" />
+        <path d="M2 16h28M16 2v28" />
+        <path d="M6.2 6.2c4.6 4.4 4.6 15.2 0 19.6M25.8 6.2c-4.6 4.4-4.6 15.2 0 19.6" />
+      </g>
+    </svg>
+  );
+}
+
+function CourtArt() {
+  return (
+    <svg className="court-art" viewBox="0 0 280 150" aria-hidden="true">
+      <g fill="none" stroke="currentColor" strokeWidth="1.5">
+        <rect x="2" y="2" width="276" height="146" rx="2" />
+        <path d="M140 2v146" />
+        <circle cx="140" cy="75" r="18" />
+        <rect x="2" y="50" width="52" height="50" />
+        <rect x="226" y="50" width="52" height="50" />
+        <path d="M2 14h16a62 62 0 0 1 0 122H2M278 14h-16a62 62 0 0 0 0 122h16" />
+        <circle cx="54" cy="75" r="12" />
+        <circle cx="226" cy="75" r="12" />
+      </g>
+      <circle cx="12" cy="75" r="3" fill="var(--accent)" />
+      <circle cx="268" cy="75" r="3" fill="var(--accent)" />
+    </svg>
   );
 }
 

@@ -8,8 +8,13 @@ import cv2
 import numpy as np
 import torch
 from workers.video.runtime import select_device, get_model, infer
-from workers.video.tracker import Tracker
-from workers.video.identity import PlayerIdentityTracker, uniform_descriptor
+from workers.video.tracker import ContinuityTracker, iou
+from workers.video.teams import TeamGrouper, flag_non_players, torso_colour_feature
+from workers.video.identity import (
+    PlayerIdentityTracker,
+    uniform_descriptor,
+    propose_tracklet_merges,
+)
 from workers.video.highlights import build_highlights, render_highlights
 from workers.render.media import probe, render_clip, verify_clip, sha256
 
@@ -52,8 +57,10 @@ def process_video(source_path, output_dir, options, emit):
     # Reject low-score detections before the expensive pose head, not after it.
     # A single worker owns the cached model and sets this for every job.
     model.roi_heads.score_thresh = options.get("confidence", 0.75)
-    tracker, samples, processed = Tracker(), [], 0
-    identities = PlayerIdentityTracker(game)
+    tracker, samples, processed = ContinuityTracker(), [], 0
+    teams = TeamGrouper()
+    track_descriptors = {}
+    identities = PlayerIdentityTracker(game, reconnection="review")
     cap = cv2.VideoCapture(str(source_path))
     inference_time = 0.0
     transfer_time = 0.0
@@ -105,15 +112,25 @@ def process_video(source_path, output_dir, options, emit):
                 ]
                 keep = keep & torch.tensor(in_court, dtype=torch.bool)
             boxes = result["boxes"][keep].numpy()
-            ids = tracker.update(boxes)
-            associations = identities.update(
-                ids, boxes, [uniform_descriptor(frame, box) for box in boxes], timestamp
-            )
+            descriptors = [uniform_descriptor(frame, box) for box in boxes]
+            ids = tracker.update(boxes, descriptors, timestamp_ms=timestamp)
+            associations = identities.update(ids, boxes, descriptors, timestamp)
             batch = []
             w, h = metadata["width"], metadata["height"]
             for j, (box, track_id) in enumerate(zip(boxes, ids)):
                 x1, y1, x2, y2 = map(float, box)
                 kp = result["keypoints"][keep][j].numpy()
+                contaminated = any(
+                    j != k and iou(box, other) > 0.3 for k, other in enumerate(boxes)
+                )
+                track_key = associations[j]["track_id"]
+                teams.observe(
+                    track_key,
+                    None if contaminated else torso_colour_feature(frame, box, kp),
+                    timestamp,
+                )
+                if descriptors[j] is not None and not contaminated:
+                    track_descriptors.setdefault(track_key, []).append(descriptors[j])
                 # Visibility flags are not calibrated pose probabilities; keep them explicit.
                 points = [
                     {
@@ -155,6 +172,37 @@ def process_video(source_path, output_dir, options, emit):
         )
     if index == 0:
         raise ValueError("No decodable video frames")
+    aspect = metadata["width"] / metadata["height"]
+    first_roles = flag_non_players(
+        samples, aspect=aspect, court_polygon=options.get("court_polygon")
+    )
+    team_map, team_summary = teams.assign(
+        exclude=[k for k, v in first_roles.items() if v["role_status"] != "unknown"]
+    )
+    role_flags = flag_non_players(
+        samples,
+        aspect=aspect,
+        court_polygon=options.get("court_polygon"),
+        team_assignments=team_map,
+    )
+    prototypes = {}
+    for key, values in track_descriptors.items():
+        if len(values) >= 3:
+            vector = np.mean(values, axis=0)
+            prototypes[key] = vector / max(1e-8, np.linalg.norm(vector))
+    merges = propose_tracklet_merges(
+        samples, descriptors=prototypes, teams=team_map, aspect=aspect
+    )
+    enriched = {}
+    for sample in samples:
+        key = sample["track_id"]
+        fields = dict(
+            team_label=team_map.get(key, {}).get("team", "unknown"),
+            role_status=role_flags.get(key, {}).get("role_status", "unknown"),
+        )
+        sample.update(fields)
+        enriched[key] = fields
+    emit("tracks.enriched", dict(assignments=enriched))
     emit("phase", {"phase": "score"})
     bundle = build_highlights(
         samples, metadata["duration_ms"], metadata["fps"], stride, options["job_id"]
@@ -228,8 +276,14 @@ def process_video(source_path, output_dir, options, emit):
         first_inference_seconds=first_inference_seconds,
         precision="float32",
         model="torchvision/keypointrcnn_resnet50_fpn/COCO_V1",
-        tracker="IoU Hungarian + uniform/motion player association",
+        tracker="Continuity + review-only fragment reconnection",
+        tracker_version="continuity-review-fragments-v1",
+        continuity_stats=tracker.stats,
+        team_summary=team_summary,
+        role_flags=role_flags,
+        merge_proposals=merges,
         identity_summary=identities.summary(),
+        identity_merge_suggestions=identities.reconnection_suggestions(),
         stride=stride,
         court_polygon=options.get("court_polygon"),
         decoded_frames=index,

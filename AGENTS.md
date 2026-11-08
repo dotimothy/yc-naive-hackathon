@@ -1,8 +1,8 @@
-# ScoutFilm / PlayLattice agent instructions
+# PlayLattice agent instructions
 
 ## Goal and source of truth
 
-Build a sports video intelligence platform, with basketball as the first working local prototype. Product name is provisional; repository name is `yc-naive-hackathon`.
+Build a sports video intelligence platform, with basketball as the first working local prototype. Product name is PlayLattice; repository name is `yc-naive-hackathon`.
 Requirements: [YC Naive Hackathon brainstorming](https://docs.google.com/document/d/1kEtq_jr14fybmyRyH_d0h5GALDyeX0YExyt-AdtnJrM/edit), especially “Implementation Order — Local Core → Naive SDK → Sponsors (Authoritative)”. See `docs/PROTOTYPE_PLAN.md` and `docs/API_CONTRACT.md` for the implementation baseline. These are proposed interfaces, not existing functionality.
 
 ## Sports scope

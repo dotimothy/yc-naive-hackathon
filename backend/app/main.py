@@ -23,6 +23,7 @@ from workers.render.media import probe, sha256
 from workers.video.pipeline import process_video
 from workers.video.runtime import available_devices, select_device
 from backend.app.highlight_routes import router as highlight_router, public_highlights
+from backend.app.basketball_routes import router as basketball_router
 from workers.video.sports.basketball import OUTDOOR_SAMPLE_COURT
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -137,6 +138,9 @@ def output_emitter(game_id, id, attempt):
                 dict(job_id=id, game_id=game_id, **payload),
             )
             update(game_id, id, kind, payload)
+        elif kind == "tracks.enriched":
+            put("track_metadata", id, dict(job_id=id, **payload))
+            update(game_id, id, kind, payload)
         elif kind == "clip.updated":
             payload["attempt"] = attempt
             path = payload.pop("path")
@@ -183,7 +187,7 @@ def run_job(id):
             # Each retry replaces this job's materialized output; the append-only audit retains history.
             with connect() as db:
                 for row in db.execute(
-                    "SELECT kind,id,value FROM records WHERE kind IN ('batch','clip','event','highlights')"
+                    "SELECT kind,id,value FROM records WHERE kind IN ('batch','clip','event','highlights','track_metadata')"
                 ).fetchall():
                     if json.loads(row["value"]).get("job_id") == id:
                         db.execute(
@@ -251,10 +255,17 @@ async def lifespan(app):
                 error="Server restarted during highlight generation; generate again",
             )
             put("highlights", bundle["job_id"], bundle)
+    for job in all_records("basketball_job"):
+        if job["status"] in ("queued", "running"):
+            job.update(
+                status="failed",
+                error="Server restarted during ball analysis; submit again",
+            )
+            put("basketball_job", job["run_id"], job)
     yield
 
 
-app = FastAPI(title="ScoutFilm local", lifespan=lifespan)
+app = FastAPI(title="PlayLattice local", lifespan=lifespan)
 
 
 @app.get("/api/health")
@@ -416,6 +427,13 @@ def analyze(
                 raise HTTPException(
                     409, "Wait for highlight generation before re-analysis"
                 )
+            if any(
+                j["game_id"] == game_id and j["status"] in ("queued", "running")
+                for j in all_records("basketball_job")
+            ):
+                raise HTTPException(
+                    409, "Wait for ball/hoop analysis before replacing player tracking"
+                )
             # One active job per game prevents mixed tracking timelines.
             if any(
                 j["game_id"] == game_id and j["status"] in ("queued", "running")
@@ -461,12 +479,46 @@ def latest_job_id(game):
     return jobs[-1]["job_id"] if jobs else None
 
 
+def identity_revision(job_id):
+    return next(
+        (
+            r.get("revision", 0)
+            for r in all_records("identity_correction")
+            if r["job_id"] == job_id
+        ),
+        0,
+    )
+
+
+def corrected_samples(job_id):
+    from workers.video.identity_corrections import apply_track_splits
+
+    samples = [
+        sample
+        for batch in all_records("batch")
+        if batch["job_id"] == job_id
+        for sample in batch["items"]
+    ]
+    correction = next(
+        (r for r in all_records("identity_correction") if r["job_id"] == job_id), {}
+    )
+    return apply_track_splits(samples, correction.get("splits", []))
+
+
 @app.get("/api/games/{game_id}/tracks")
 def tracks(game_id: str, after_ms: int = -1):
     get("game", game_id)
     latest = latest_job_id(game_id)
-    batches = [b for b in all_records("batch") if b["job_id"] == latest]
-    items = [s for b in batches for s in b["items"] if s["timestamp_ms"] > after_ms]
+    items = [s for s in corrected_samples(latest) if s["timestamp_ms"] > after_ms]
+    meta = next(
+        (
+            m["assignments"]
+            for m in all_records("track_metadata")
+            if m["job_id"] == latest
+        ),
+        {},
+    )
+    items = [dict(sample, **meta.get(sample["track_id"], {})) for sample in items]
     manifests = [
         bundle for bundle in all_records("highlights") if bundle["job_id"] == latest
     ]
@@ -592,6 +644,7 @@ def profiles():
 
 
 app.include_router(highlight_router)
+app.include_router(basketball_router)
 
 
 if (ROOT / "frontend/dist").exists():

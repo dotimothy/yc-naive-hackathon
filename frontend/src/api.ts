@@ -5,10 +5,9 @@ import type {
   Game,
   GameEvent,
   HighlightBundle,
-  HighlightEventType,
-  HighlightReviewStatus,
   Items,
   Job,
+  ReviewRequest,
   RosterGroup,
   TrackSample,
 } from './types';
@@ -33,7 +32,7 @@ function detailMessage(body: unknown, status: number): string {
   return `Request failed (HTTP ${status})`;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
     response = await fetch(path, init);
@@ -120,7 +119,7 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  reviewHighlight: (gameId: string, candidateId: string, body: { decision: HighlightReviewStatus; event_type: HighlightEventType }) =>
+  reviewHighlight: (gameId: string, candidateId: string, body: ReviewRequest) =>
     request<HighlightBundle>(`/api/games/${enc(gameId)}/highlights/candidates/${enc(candidateId)}/review`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },

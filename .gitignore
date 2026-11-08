@@ -23,3 +23,6 @@ data/
 *.mov
 *.mkv
 *.avi
+
+# Optional isolated basketball detector environment
+.venv-ball/
