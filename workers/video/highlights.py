@@ -66,7 +66,11 @@ def visual_components(samples, interval_ms):
 def summarize(bundle, groups=None, reviews=None):
     groups = groups if groups is not None else bundle.get("roster_groups", [])
     reviews = reviews or {}
-    assignments = {t: g for g in groups for t in g["track_ids"]}
+    manual = {t: g for g in groups for t in g["track_ids"]}
+    automatic = {
+        t: g for g in bundle.get("automatic_players", []) for t in g["track_ids"]
+    }
+    assignments = {**automatic, **manual}
     for candidate in bundle["candidates"]:
         group = assignments.get(candidate["track_id"])
         candidate["player_id"] = (
@@ -130,7 +134,20 @@ def summarize(bundle, groups=None, reviews=None):
                 player_id=id,
                 label=group["label"] if group else "Track " + track_id,
                 track_ids=[],
-                identity_confirmed=bool(group),
+                identity_confirmed=track_id in manual,
+                identity_source="reviewer"
+                if track_id in manual
+                else "automatic"
+                if group
+                else "track",
+                association_status="confirmed"
+                if track_id in manual
+                else group.get("association_status", "provisional")
+                if group
+                else "unlinked",
+                association_confidence=group.get("association_confidence")
+                if group
+                else None,
                 highlight_score=None,
                 verified_play_count=0,
                 candidate_count=0,
@@ -139,6 +156,8 @@ def summarize(bundle, groups=None, reviews=None):
             ),
         )
         player["track_ids"].append(track_id)
+        if track_id not in manual:
+            player["identity_confirmed"] = False
         # Union times below prevents simultaneous fragments from inflating observed time.
     for player in players.values():
         times = set(
@@ -273,7 +292,46 @@ def build_highlights(
         max_clips=max_clips,
         top_per_player=top_per_player,
     )
+    attach_player_identities(bundle, samples)
     return summarize(bundle)
+
+
+def attach_player_identities(bundle, samples):
+    """Persistent anonymous IDs group fragments; reviewer mappings always override them."""
+    players = {}
+    track_owners = {}
+    for sample in samples:
+        pid = sample.get("player_id")
+        if not pid:
+            continue
+        track = str(sample["track_id"])
+        track_owners.setdefault(track, set()).add(pid)
+        player = players.setdefault(
+            pid,
+            dict(
+                player_id=pid,
+                label=sample.get("player_label", pid),
+                track_ids=set(),
+                association_status="provisional",
+                association_confidence=None,
+            ),
+        )
+        player["track_ids"].add(track)
+        if sample.get("identity_status") == "ambiguous":
+            player["association_status"] = "needs_review"
+        value = sample.get("association_confidence")
+        if value is not None:
+            previous = player["association_confidence"]
+            player["association_confidence"] = (
+                min(previous, value) if previous is not None else value
+            )
+    # Old/malformed evidence with one track claimed by two players is never silently merged.
+    for player in players.values():
+        player["track_ids"] = sorted(
+            t for t in player["track_ids"] if len(track_owners[t]) == 1
+        )
+    bundle["automatic_players"] = [p for p in players.values() if p["track_ids"]]
+    return bundle
 
 
 def clear_clips(bundle):

@@ -9,6 +9,7 @@ import numpy as np
 import torch
 from workers.video.runtime import select_device, get_model, infer
 from workers.video.tracker import Tracker
+from workers.video.identity import PlayerIdentityTracker, uniform_descriptor
 from workers.video.highlights import build_highlights, render_highlights
 from workers.render.media import probe, render_clip, verify_clip, sha256
 
@@ -52,6 +53,7 @@ def process_video(source_path, output_dir, options, emit):
     # A single worker owns the cached model and sets this for every job.
     model.roi_heads.score_thresh = options.get("confidence", 0.75)
     tracker, samples, processed = Tracker(), [], 0
+    identities = PlayerIdentityTracker(game)
     cap = cv2.VideoCapture(str(source_path))
     inference_time = 0.0
     transfer_time = 0.0
@@ -104,6 +106,9 @@ def process_video(source_path, output_dir, options, emit):
                 keep = keep & torch.tensor(in_court, dtype=torch.bool)
             boxes = result["boxes"][keep].numpy()
             ids = tracker.update(boxes)
+            associations = identities.update(
+                ids, boxes, [uniform_descriptor(frame, box) for box in boxes], timestamp
+            )
             batch = []
             w, h = metadata["width"], metadata["height"]
             for j, (box, track_id) in enumerate(zip(boxes, ids)):
@@ -122,7 +127,7 @@ def process_video(source_path, output_dir, options, emit):
                 batch.append(
                     dict(
                         game_id=game,
-                        track_id=str(track_id),
+                        **associations[j],
                         timestamp_ms=timestamp,
                         bbox=[x1 / w, y1 / h, (x2 - x1) / w, (y2 - y1) / h],
                         keypoints=points,
@@ -223,7 +228,8 @@ def process_video(source_path, output_dir, options, emit):
         first_inference_seconds=first_inference_seconds,
         precision="float32",
         model="torchvision/keypointrcnn_resnet50_fpn/COCO_V1",
-        tracker="IoU Hungarian baseline",
+        tracker="IoU Hungarian + uniform/motion player association",
+        identity_summary=identities.summary(),
         stride=stride,
         court_polygon=options.get("court_polygon"),
         decoded_frames=index,
