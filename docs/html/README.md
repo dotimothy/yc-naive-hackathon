@@ -20,7 +20,7 @@ The existing Sites URL remains available independently. Both hosts serve the sta
 
 ## Product demo
 
-The page embeds the completed two-minute demo at `#demo`, with native playback controls, a poster image, segmented HLS for reliable seeking, and a direct MP4 link. Safari uses native HLS; supported Chrome/Firefox browsers use the bundled hls.js player. `assets/playlattice-demo.mp4` is a compressed H.264/AAC web derivative of the current customer/Outreach cut. This is the one explicitly published video exception in `.gitignore`; source footage and other generated videos remain ignored. See `assets/DEMO.md` for provenance, checksums, and source credits.
+The page embeds the product demo from [YouTube](https://www.youtube.com/watch?v=Lu6JVhPCQiE) at `#demo`, using YouTube’s privacy-enhanced embed and a direct Watch On YouTube link. The responsive player supports fullscreen. Previous local MP4/HLS demo assets remain archived in the repository but are no longer loaded by the page; see `assets/DEMO.md` for their provenance.
 
 The page uses the app’s bundled Barlow fonts and broadcast theme. `page.js` handles accessible tabs and a clearly labeled quiz interaction example. Motion honors the system preference; the recorded GIF has a still-image fallback.
 

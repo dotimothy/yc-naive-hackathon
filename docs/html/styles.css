@@ -1403,7 +1403,7 @@ body {
   font-size: 30px;
   margin: 10px 0 8px;
 }
-.demo-section video {
+.demo-section .demo-youtube {
   display: block;
   width: 100%;
   height: auto;
