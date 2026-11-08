@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildEvidence, snapshotId, validatePackage } from './analysis-contract.js';
+import { buildEvidence, snapshotId, validatePackage, metadataCaption } from './analysis-contract.js';
 import { WorkflowStore } from './analysis-store.js';
 const hash='a'.repeat(64);
 const job={game_id:'g',job_id:'j',status:'succeeded',report:{source_sha256:hash}};
@@ -44,3 +44,5 @@ test('cancellation cannot be lost by an older asynchronous writer',()=>{
   assert.equal(s.get('j').state,'cancelling');assert.equal(s.get('j').cancel_requested,true);assert.equal(s.get('j').output,null);assert.equal(s.get('j').reserved,1_000_000);
  }finally{s.close();}
 });
+
+test('metadata captions state duration and uncertainty without invented action',()=>{assert.equal(metadataCaption({source_start_ms:1003,source_end_ms:8256}),'Basketball gameplay · 7.3 seconds. Player identities unverified.');assert.throws(()=>metadataCaption({source_start_ms:2,source_end_ms:1}));});

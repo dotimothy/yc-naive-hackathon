@@ -38,3 +38,10 @@ export function buildEvidence(gameId: string, job: any, clips: any[]): AnalysisE
     .map(c => ({ clip_id: c.clip_id, source_start_ms: c.source_start_ms, source_end_ms: c.source_end_ms, shot_id: c.shot_id, identity_verified: false as const }));
   return { schema_version: 1, game_id: gameId, job_id: job.job_id, source_sha256: hash, clips: safe, identity_verified: false, visual_input: false };
 }
+
+/** Timing metadata cannot support descriptions of possession, ball movement or play outcomes. */
+export function metadataCaption(clip: Pick<ClipEvidence,'source_start_ms'|'source_end_ms'>) {
+  const duration = clip.source_end_ms - clip.source_start_ms;
+  if (!Number.isSafeInteger(duration) || duration <= 0) throw new Error('Invalid caption duration');
+  return `Basketball gameplay · ${(duration / 1000).toFixed(1)} seconds. Player identities unverified.`;
+}

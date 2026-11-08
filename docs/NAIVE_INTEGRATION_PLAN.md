@@ -8,7 +8,7 @@ The first connection is implemented under `integrations/naive/src/analysis-*.ts`
 
 This is a **metadata-only completion handoff**, not the later remote MCP bridge or VLM discovery pipeline. The GPU worker remains local and unchanged. Outputs are available at `http://127.0.0.1:8011/workflows`; they are not yet shown in the main dashboard. The sidecar supports cancellation and detects superseded/cancelled analysis. Existing UI cancellation after CV completion is still an integration gap.
 
-Implemented controls include SQLite state/reservations, stable persisted request bodies and idempotency keys, $1 root-session cap, $9/month dispatcher reservations (leaving $1 for onboarding), five-member completion checks, source/clip validation, overlap/output-length limits, and cancellation winning over late success. Software validation: TypeScript plus 22 tests. The real TrackID3x3 handoff was accepted as one session, but its completed-team acceptance is pending intermittent Naive capacity errors. Do not describe the six-agent live path as validated until all five members return and output/cost checks pass.
+Implemented controls include SQLite state/reservations, stable persisted request bodies and idempotency keys, $1 root-session cap, $9/month dispatcher reservations (leaving $1 for onboarding), five-member completion checks, source/clip validation, overlap/output-length limits, and cancellation winning over late success. Software validation: TypeScript plus 23 tests. The real TrackID3x3 handoff completed with the CEO and all five specialists, selected one nonoverlapping source-linked clip, and cost $0.04054 across the session tree. FFprobe verified its H.264/AAC media at 1280×720 and 7.257 seconds. The model caption overinterpreted timing metadata; local output now replaces such captions with duration and identity-uncertainty statements. This validates the metadata handoff, not visual semantic understanding.
 
 ## 1. Goal and acceptance target
 
@@ -234,3 +234,9 @@ Implementation decisions to resolve with evidence: authenticated bridge provider
 No paid resources or account settings are changed by approving or reading this plan. Reuse the existing crew IDs. Any later remote configuration change must have a concrete diff and remain within the approved limits.
 
 References: [local Phase 1 acceptance](PHASE1_ACCEPTANCE.md), [developer handoff](HANDOFF.md), [SDK onboarding](../integrations/naive/README.md), [current API contract](API_CONTRACT.md), [Naive SDK reference](https://usenaive.ai/docs/sdk/typescript), [team coordinator](https://usenaive.ai/docs/team/coordinator), [delegation](https://usenaive.ai/docs/team/delegation), [budget enforcement](https://usenaive.ai/docs/concepts/budgets).
+
+## Unlisted publishing authorization
+
+The operator authorized automatic publishing with **unlisted visibility only**. This supersedes the earlier publishing deferral for that narrow scope. Always send an explicit visibility; never inherit an account default or fall back to public. Verify a connected destination supports unlisted uploads before sending. Account inspection currently encounters intermittent Naive capacity errors; no post has been submitted by this integration. The autonomous publisher is not yet implemented.
+
+Use the corrected metadata-only caption, source credit and license when preparing test publication. For the pinned indoor sample, credit TrackID3x3, Kazuhiro Yamada et al., CC BY 4.0, https://github.com/open-starlab/TrackID3x3; identify the video as an excerpt processed by PlayLattice. Preserve attribution when sharing derived footage.

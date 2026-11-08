@@ -1,6 +1,6 @@
 import type { VettaClient } from '@usenaive-sdk/managed-agents';
 import { crew, crewMembers } from './crew.js';
-import { buildEvidence, packageSchema, snapshotId, validatePackage } from './analysis-contract.js';
+import { buildEvidence, packageSchema, snapshotId, validatePackage, metadataCaption } from './analysis-contract.js';
 import type { WorkflowStore } from './analysis-store.js';
 
 /** Deterministic local orchestration; remote sessions never execute local inference. */
@@ -65,7 +65,8 @@ async function advance(r:any) {
  r.state='succeeded';r.completed_at=new Date().toISOString();
  r.reserved=session.consumed_micro_usd+children.reduce((sum,t)=>sum+t.consumed_micro_usd,0);
  r.cost_micro_usd=r.reserved;r.members=children.map(t=>({session_id:t.id,agent_id:t.agent_id,status:t.status,stop_reason:t.stop_reason,cost_micro_usd:t.consumed_micro_usd}));
- r.output.clips=r.output.clips.map((c:any)=>({...c,...r.evidence.clips.find((e:any)=>e.clip_id===c.clip_id),uri:clips.items.find((e:any)=>e.clip_id===c.clip_id)?.uri}));
+ r.output.clips=r.output.clips.map((c:any)=>({...c,...r.evidence.clips.find((e:any)=>e.clip_id===c.clip_id),uri:clips.items.find((e:any)=>e.clip_id===c.clip_id)?.uri,caption:metadataCaption(r.evidence.clips.find((e:any)=>e.clip_id===c.clip_id))}));
+ r.caption_policy='metadata_only';
  store.save(r);console.log(JSON.stringify({event:'crew_completed',job_id:r.job_id,clips:r.output.clips.length,cost_micro_usd:r.cost_micro_usd}));
 }
 
