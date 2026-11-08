@@ -2,6 +2,10 @@
 
 Source: [planning doc](https://docs.google.com/document/d/1kEtq_jr14fybmyRyH_d0h5GALDyeX0YExyt-AdtnJrM/edit), read 2026-11-07. The final implementation-order section supersedes earlier cloud-first schedules.
 
+## Current Phase 1 scope (user update)
+
+Authorized input → unattended analysis → source-verified clips and results. No human action is required between submission and outputs. Persisted jobs/audit, bounded recovery, restart persistence and CPU smoke remain required. Private profiles, verified rosters and outreach simulation are deferred; this supersedes the older milestones below. Naive integration follows local acceptance. Optional corrections and reviewed statistics do not gate autonomous visual-activity output.
+
 ## Product scope
 
 The product serves sports in general. Basketball is the initial implementation and acceptance target. Reuse the video/job/clip/profile pipeline; isolate event vocabulary and court assumptions in basketball configuration. Expansion to other sports follows validation of the first prototype.
@@ -37,4 +41,4 @@ First integration happens as soon as the worker emits a single real track batch;
 
 Cut automated sports-event classification, complex multi-player analytics, live camera ingest, then all optional integrations. Preserve actual tracking, source verification, clear replay labeling, consent and audit. Use coach-provided candidate time ranges explicitly labeled as annotations. Never replace real processing with fabricated fixture results in the demo.
 
-No implementation or performance checks have run yet: this commit establishes instructions and boundaries only.
+The original milestones above are retained as planning history. See docs/PHASE1_ACCEPTANCE.md for current implementation evidence and remaining limitations.

@@ -60,7 +60,7 @@ const enc = encodeURIComponent;
 export const api = {
   listGames: (signal?: AbortSignal) => request<Items<Game>>('/api/games', { signal }).then((r) => r.items),
 
-  loadSample: () => request<Game>('/api/games/sample', { method: 'POST' }),
+  loadSample: () => request<Game>('/api/games/sample?auto_analyze=true', { method: 'POST' }),
 
   /** Multipart upload with progress (fetch cannot report upload progress). */
   uploadGame(file: File, rightsConfirmed: boolean, onProgress?: (fraction: number) => void): Promise<Game> {
@@ -69,6 +69,7 @@ export const api = {
       form.append('video', file);
       form.append('rights_confirmed', rightsConfirmed ? 'true' : 'false');
       form.append('sport', 'basketball');
+      form.append('auto_analyze', 'true');
       const xhr = new XMLHttpRequest();
       xhr.open('POST', '/api/games');
       xhr.upload.onprogress = (e) => {

@@ -445,6 +445,16 @@ def process_video(source_path, output_dir, options, emit):
         emit("event.created", event)
     elapsed = time.perf_counter() - started
     report = dict(
+        automatic_output=dict(
+            status="clips_ready" if clips else "no_eligible_clips",
+            clip_count=len(clips),
+            requires_human_action=False,
+            reason=(
+                "Automatic source-verified clips are ready. Identities and basketball outcomes remain provisional."
+                if clips
+                else "No camera-safe gameplay ranges qualified for automatic clips. The analysis is complete; no approval is pending."
+            ),
+        ),
         source_sha256=source_hash,
         analysis_mode="shared_decoder",
         retrieved_frames=retrieved_frames,

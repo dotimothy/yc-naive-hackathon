@@ -14,6 +14,8 @@ export type Game = {
   frame_count?: number;
   codec?: string;
   sample?: boolean;
+  analysis_job_id?: string;
+  analysis_error?: string | null;
 };
 
 export type JobStatus = 'queued' | 'running' | 'cancelling' | 'cancelled' | 'succeeded' | 'failed';
@@ -37,6 +39,7 @@ export type CameraShot = {
 export type ShotSegments = { job_id: string | null; items: CameraShot[]; status?: string };
 
 export type JobReport = {
+  automatic_output?: { status: 'clips_ready' | 'no_eligible_clips'; clip_count: number; requires_human_action: false; reason: string };
   device?: string;
   execution_mode?: string;
   precision?: string;

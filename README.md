@@ -8,6 +8,8 @@ PlayLattice is being built for the YC Naive Hackathon. The local video workflow 
 
 *Recorded from the running app with real model predictions on the TrackID3x3 outdoor sample. Player labels are provisional; highlighted activity is not a verified basketball outcome. Footage: Kazuhiro Yamada et al., [TrackID3x3](https://github.com/open-starlab/TrackID3x3), CC BY 4.0; excerpted, resized and overlaid. [Capture details](docs/assets/README.md).*
 
+**Phase 1 complete:** authorized input → unattended local analysis → playable clip outputs, with optional cancellation. [Acceptance evidence](docs/PHASE1_ACCEPTANCE.md).
+
 ## What you can do
 
 The film room uses tabs for playback, players/highlights, camera shots, ball/hoop evidence, clips and analysis details. Player groups are searchable in a paginated stats table; detailed evidence opens on demand. Review drafts and the video playhead persist when switching sections.
@@ -45,7 +47,7 @@ npm --prefix frontend run build
 scripts/run_local.sh
 ```
 
-Open **http://127.0.0.1:8000**, choose **Load TrackID3x3 Sample**, and start analysis. For your own footage, confirm that you are authorized to analyze it before uploading. Initial setup downloads dependencies and model weights; inference runs locally after setup.
+Open **http://127.0.0.1:8000**, choose **Analyze TrackID3x3 Sample** or **Upload & Analyze**. Analysis and clip generation start automatically; the dashboard opens Clips on completion. For your own footage, confirm that you are authorized to analyze it before uploading. Initial setup downloads dependencies and model weights; inference runs locally after setup.
 
 For frontend development, run `npm --prefix frontend run dev` alongside the API. Vite proxies `/api` to port 8000.
 
@@ -73,10 +75,11 @@ Player scores express clip-review priority, not player ability. Official statist
 npm --prefix frontend run build
 ```
 
-The current backend suite has 183 passing tests. UI readability was checked in desktop and mobile Chrome. Real-video inference and export checks are separate from unit tests; passing software checks does not establish basketball recognition accuracy.
+The current backend suite has 196 passing tests. UI readability was checked in desktop and mobile Chrome. Real-video inference and export checks are separate from unit tests; passing software checks does not establish basketball recognition accuracy.
 
 ## Further reading
 
+- [Autonomous Phase 1 acceptance](docs/PHASE1_ACCEPTANCE.md)
 - **[Developer handoff and next priorities](docs/HANDOFF.md)**
 
 - [Local setup and operation](docs/LOCAL_PROTOTYPE.md)

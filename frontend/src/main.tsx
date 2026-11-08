@@ -150,6 +150,7 @@ function IngestPanel({ onGame }: { onGame: (g: Game) => void }) {
   return (
     <section className="panel">
       <h2>Add Footage</h2>
+      <p className="muted small">Upload once. Tracking, analysis and highlight clips are generated automatically; progress and finished outputs appear in the film room.</p>
       <form onSubmit={submit} className="ingest">
         <label className="file">
           <input ref={inputRef} type="file" accept="video/mp4,.mp4" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
@@ -160,13 +161,13 @@ function IngestPanel({ onGame }: { onGame: (g: Game) => void }) {
           <span>I own this footage or am authorized to analyze it locally.</span>
         </label>
         <button type="submit" disabled={!file || !rights || busy !== null}>
-          {busy === 'upload' ? (progress !== null && progress < 1 ? `Uploading ${Math.round(progress * 100)}%` : 'Probing Video…') : 'Upload Game'}
+          {busy === 'upload' ? (progress !== null && progress < 1 ? `Uploading ${Math.round(progress * 100)}%` : 'Preparing Analysis…') : 'Upload & Analyze'}
         </button>
         {file && !rights && <p className="muted small">Confirm footage rights to enable upload.</p>}
       </form>
       <div className="divider"><span>or</span></div>
       <button className="secondary" onClick={() => void sample()} disabled={busy !== null}>
-        {busy === 'sample' ? 'Loading Sample…' : 'Load TrackID3x3 Sample'}
+        {busy === 'sample' ? 'Preparing Sample…' : 'Analyze TrackID3x3 Sample'}
       </button>
       {error && <div className="alert error">{error}</div>}
     </section>
@@ -247,6 +248,10 @@ function GameRoom({ game }: { game: Game }) {
 
   const job = room.activeJob;
   const active = !!job && !isTerminal(job);
+  // The submitted input completes directly into its outputs; no Generate/Review click is required.
+  useEffect(() => {
+    if (job?.status === 'succeeded' && job.job_id === game.analysis_job_id) setTab('clips');
+  }, [job?.status, job?.job_id, game.analysis_job_id]);
 
   return (
     <div className="room">
@@ -280,6 +285,7 @@ function GameRoom({ game }: { game: Game }) {
         </div>
       )}
       {room.startError && <div className="alert error">Could not start analysis: {room.startError}</div>}
+      {game.analysis_error && (!job || job.job_id === game.analysis_job_id) && <div className="alert error" role="alert">Video uploaded, but automatic analysis could not start: {game.analysis_error}</div>}
       {room.cancelError && <div className="alert error" role="alert">Could not cancel analysis: {room.cancelError}</div>}
       {job?.status === 'cancelled' && <p className="alert warn" role="status">Analysis cancelled. Partial results were cleared. You can run analysis again.</p>}
       {room.streamState !== 'live' && room.streamState !== 'connecting' && (
@@ -528,6 +534,7 @@ function ClipsPanel({ clips, events, job, onSeek }: { clips: Clip[]; events: Rec
         <h3>Clips</h3>
         <span className="muted small">Ranges are in original source time</span>
       </div>
+      {job?.report?.automatic_output && <p className="alert" role="status">{job.report.automatic_output.reason}</p>}
       {clips.length === 0 ? (
         <p className="muted small">
           {!job ? 'Run analysis to render review clips.' : job.status === 'cancelled' ? 'Analysis cancelled. Run analysis again to generate clips.' : job.status === 'failed' ? 'No clips: the analysis failed.' : isTerminal(job) ? 'This job produced no clips.' : 'Clips render after tracking completes.'}

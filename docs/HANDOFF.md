@@ -2,6 +2,10 @@
 
 Updated 2026-11-07. Implementation baseline: `develop` at `d6f247a` (Title Case tab labels). This document is the starting point for the next developer or coding session; follow [AGENTS.md](../AGENTS.md) for ownership and repository rules.
 
+## Phase 1 closeout update
+
+The user’s latest scope is input → unattended processing → outputs, with optional cancellation and no intervening approvals. This local Phase 1 is complete: upload/sample input now durably starts analysis and automatic clip rendering. Profiles, roster verification and outreach are deferred from this milestone. See [Phase 1 acceptance](PHASE1_ACCEPTANCE.md) for real-video MPS/CPU runs, retry/cancellation/restart evidence and 196 passing tests. This update supersedes older Phase 1 profile requirements below; all model-quality caveats remain. Naive integration is next.
+
 ## Start here
 
 - **Product:** PlayLattice, a local sports video intelligence app; basketball is the first supported sport.
@@ -46,7 +50,7 @@ Python 3.9.6 and macOS arm64 were exercised locally. Use `requirements.txt` acro
 ## Current user workflow
 
 1. Upload an authorized basketball MP4, or load the TrackID3x3 sample.
-2. Run **Analyze Footage**. One coordinated worker performs player and ball inference with persisted progress. **Cancel Analysis** stops the job and clears its partial derived output; source footage remains.
+2. Submit **Upload & Analyze** or **Analyze TrackID3x3 Sample**. One coordinated worker automatically performs player and ball inference and renders clips with persisted progress. No subsequent Analyze/Generate/Review action is required; the UI opens Clips on completion. **Cancel Analysis** stops the job and clears its partial derived output; source footage remains.
 3. In **Film**, replay the source with sampled boxes, pose and ball/hoop overlays. Inspect provisional tracks and split identities at a swap if needed.
 4. In **Players & Highlights**, use the searchable, paginated player table. **Details** opens source-backed stats/identity information; **Review clips** opens that group's candidate review.
 5. Use the nested **Candidate Review** and **Identity Corrections** tabs for approvals and fragment grouping. Actor confirmation, source event time and outcome are required for basketball stats. Uncertain or duplicate evidence is held from totals.
@@ -134,7 +138,7 @@ Model/runtime/dataset licenses differ. Ultralytics uses AGPL-3.0 or Enterprise t
 
 ## Evidence and completed checks
 
-- **Backend:** 183 tests pass in the current checkout. Tests cover software boundaries; they do not establish basketball recognition accuracy.
+- **Backend:** 196 tests pass in the current checkout. Tests cover software boundaries; they do not establish basketball recognition accuracy.
 - **Frontend:** typecheck/production build passes. Chrome desktop/mobile checks exercised tabs, player search/pagination, clip pagination, draft preservation, return-to-film seeking, hidden-video pausing, keyboard navigation, and no mobile horizontal page overflow or JavaScript exceptions.
 - **Camera cuts:** a deliberate outdoor→indoor cut at 2 seconds was detected at the correct boundary. Identities reset and generated clips stayed within their shot. Two uncut short samples did not produce false cuts. This is not a broadcast cut-detection precision/recall benchmark.
 - **Cancellation:** a real worker stopped in approximately 378 ms in the measured cancellation test; partial derived records were cleared.
@@ -165,10 +169,10 @@ Details: [model comparison](EBARD_MODEL_BENCHMARK.md), [YOLOE candidate](YOLO_BA
 
 ## Next priorities
 
-1. **Accept one representative end-to-end video.** Upload → analysis → identity corrections → reviewer-confirmed stats → playable player highlights. Current evidence is mostly short stationary 3x3 clips; include occlusion, camera changes and footage held out from tuning. Record failures rather than silently merging identities or inventing events.
+1. **Local autonomous acceptance is complete for the tested scope.** Upload → unattended analysis → verified playable visual-activity clips; optional identity corrections/reviewed stats do not gate it. Current evidence is mostly short stationary 3x3 clips; include occlusion, camera changes and footage held out from tuning. Record failures rather than silently merging identities or inventing events.
 2. **Prioritize identity correctness.** Prevent swaps and incorrect merges, preserve uncertain fragments, and use reviewer corrections before attributing stats/clips. Validate on held-out footage before claiming improvement. The user explicitly made this a priority.
 3. **Improve RF-DETR runtime only with paired quality checks.** Shared decoding and the model-alternative search are already done. A next candidate is the model's inference-optimization/tracing path at the same resolution; it has not been benchmarked. Compare actual job wall time as well as synchronized model time. CUDA needs its own hardware validation.
-4. **Prepare a narrow Naive integration after local acceptance.** Use deterministic, idempotent tools for submitting an analysis, polling status, cancellation and retrieving source-linked metadata/clips. Carry job/source IDs, timestamps, shot ranges, detector provenance and review status. Investigate actual SDK/runtime support before writing integration code; no Naive API or GPU availability has been established here.
+4. **Prepare a narrow Naive integration next.** Use deterministic, idempotent tools for submitting an analysis, polling status, cancellation and retrieving source-linked metadata/clips. Carry job/source IDs, timestamps, shot ranges, detector provenance and review status. Investigate actual SDK/runtime support before writing integration code; no Naive API or GPU availability has been established here.
 5. **Sponsor integrations follow Naive.** Verified roster consent/private profiles and any external workflows are separate unfinished work, not features already present.
 
 Do not continue model shopping without new evidence. The agreed default is RF-DETR. Do not describe highlight-priority scores as player skill, unknown outcomes as misses, provisional groups as verified athletes, or lack of observations as proof no play occurred.

@@ -1,5 +1,9 @@
 # Local prototype handoff
 
+## Current milestone
+
+Autonomous local Phase 1 is complete under the user’s updated input → processing → output scope. Upload & Analyze and Analyze TrackID3x3 Sample queue analysis automatically; no clip approval or generation click is required. Cancellation stays available. Profiles, verified rosters and outreach are deferred. See [acceptance evidence](PHASE1_ACCEPTANCE.md); historical measurements below retain their original model context.
+
 ## Start
 
 From the repository root on macOS:
@@ -15,7 +19,7 @@ npm --prefix frontend run build
 scripts/run_local.sh
 ```
 
-Open http://127.0.0.1:8000. Load the sample, then run analysis. Pose uses the hash-pinned official YOLO26n-pose checkpoint (~7.9 MB), downloaded explicitly above. Keep the checkpoint and sample for offline use. Run `scripts/setup_ball_detector.sh` to also enable the optional ball/hoop detector. No external inference, Naive or sponsor service is used. The worker now defaults to accelerated device selection; see [acceleration setup and benchmarks](ACCELERATION.md).
+Open http://127.0.0.1:8000. Submit Upload & Analyze or Analyze TrackID3x3 Sample; processing and clip generation start automatically. Pose uses the hash-pinned official YOLO26n-pose checkpoint (~7.9 MB), downloaded explicitly above. Keep the checkpoint and sample for offline use. Run `scripts/setup_ball_detector.sh` to also enable the optional ball/hoop detector. No external inference, Naive or sponsor service is used. The worker now defaults to accelerated device selection; see [acceleration setup and benchmarks](ACCELERATION.md).
 
 For frontend development, run `npm --prefix frontend run dev` alongside the API and open the Vite URL. Vite proxies `/api` to port 8000. The production frontend build is served by FastAPI; restart the API after the first build. Python 3.9.6 and Node 26.13.0 were used locally. `requirements.lock.txt` records the macOS arm64/Python 3.9 resolution; other platforms should resolve `requirements.txt`. Linux CPU users can install matching CPU Torch/Torchvision wheels from the official PyTorch index before the remaining dependencies.
 
@@ -54,7 +58,7 @@ Chrome browser integration checked source and clip playback, seeking with overla
 
 ## Boundaries and next work
 
-This is the first video/dashboard/clip milestone, not full Stage 1 acceptance. Private profiles and roster verification, outreach simulation, phase-specific resume, model accuracy evaluation, better occlusion tracking and durable scheduling remain to be implemented. `/api/profiles` returns an empty list until consent/identity handling exists. Highlight-priority scores and reviewer-confirmed outcome labels are now available; player suitability scores, automatic jersey identities and official event statistics are not generated.
+Autonomous local Stage 1 acceptance is complete for the revised scope; optional profiles/outreach are deferred. Private profiles and roster verification, outreach simulation, phase-specific resume, model accuracy evaluation, better occlusion tracking and durable scheduling remain to be implemented. `/api/profiles` returns an empty list until consent/identity handling exists. Highlight-priority scores and reviewer-confirmed outcome labels are now available; player suitability scores, automatic jersey identities and official event statistics are not generated.
 
 The baseline can miss people, include referees and fragment IDs. It is sampled batch analysis, not demonstrated real-time live coverage. Measure latency from each actual run; browser transport delay is distinct from model inference speed.
 

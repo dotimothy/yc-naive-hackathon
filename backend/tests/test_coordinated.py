@@ -128,6 +128,10 @@ def test_single_decoder_model_cadences_and_source_timestamps(
         "basketball_status"
     ] == ("failed" if ball_failure else "succeeded")
     assert result["retrieved_frames"] == 12 and result["decoded_frames"] == 12
+    # Uncertain/close-up shots finish honestly with empty outputs, never an approval gate.
+    assert result["automatic_output"]["status"] == "no_eligible_clips"
+    assert result["automatic_output"]["requires_human_action"] is False
+    assert result["automatic_output"]["clip_count"] == 0
     assert [
         v["source_timestamp_ms"] for k, v in events if k == "analysis.progress"
     ] == [i * 100 for i in expected]

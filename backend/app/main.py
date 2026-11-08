@@ -439,11 +439,59 @@ def games():
     return {"items": [public_game(g) for g in all_records("game")]}
 
 
+def ingested_game(game, auto_analyze):
+    """Persist the ingest before queueing; client disconnects do not own the worker."""
+    if not auto_analyze:
+        return public_game(game)
+    with LOCK:
+        latest = latest_job_id(game["game_id"])
+        previous = get("job", latest) if latest else None
+        if previous and previous["status"] in (
+            "queued",
+            "running",
+            "cancelling",
+            "succeeded",
+        ):
+            game.pop("analysis_error", None)
+            put("game", game["game_id"], game)
+            return dict(public_game(game), analysis_job_id=latest)
+        key = "ingest:" + game["game_id"] + (":" + latest if latest else "")
+        try:
+            job = analyze(game["game_id"], Analysis(), idempotency_key=key)
+        except (HTTPException, OSError, RuntimeError) as exc:
+            # A successful upload remains accessible even if scheduling is unavailable.
+            error = (
+                exc.detail
+                if isinstance(exc, HTTPException) and isinstance(exc.detail, str)
+                else "Analysis could not start. Retry analysis from this video."
+            )
+            game["analysis_error"] = error
+            put("game", game["game_id"], game)
+            failed_id = latest_job_id(game["game_id"])
+            if failed_id and failed_id != latest:
+                failed = get("job", failed_id)
+                if failed["status"] == "queued":
+                    set_job(failed_id, status="failed", error=error)
+                    audit(
+                        game["game_id"],
+                        failed_id,
+                        "analysis_enqueue_failed",
+                        "failed",
+                        0,
+                    )
+                return dict(public_game(game), analysis_job_id=failed_id)
+            return public_game(game)
+        game.pop("analysis_error", None)
+        put("game", game["game_id"], game)
+        return dict(public_game(game), analysis_job_id=job["job_id"])
+
+
 @app.post("/api/games", status_code=201)
 def upload(
     video: UploadFile = File(...),
     rights_confirmed: bool = Form(...),
     sport: str = Form("basketball"),
+    auto_analyze: bool = Form(False),
 ):
     if not rights_confirmed:
         raise HTTPException(422, "Confirm footage rights before upload")
@@ -461,42 +509,48 @@ def upload(
                 if size > 250 * 1024 * 1024:
                     raise HTTPException(413, "Use a file smaller than 250 MiB")
                 target.write(block)
-        return public_game(
-            register_game(path, Path(video.filename or "Uploaded game").name)
-        )
+        game = register_game(path, Path(video.filename or "Uploaded game").name)
     except Exception:
         path.unlink(missing_ok=True)
         raise
     finally:
         video.file.close()
+    # Do not remove registered media if analysis queueing subsequently fails.
+    return ingested_game(game, auto_analyze)
 
 
 @app.post("/api/games/sample", status_code=201)
-def sample():
+def sample(auto_analyze: bool = False):
     source = ROOT / "data/trackid3x3/outdoor_stationary_12s.mp4"
     outdoor = source.exists()
     if not outdoor:
         source = ROOT / "data/trackid3x3/basket_S1T1_pre.mp4"
     if not source.exists():
         raise HTTPException(404, "Run scripts/download_sample.py first")
-    for game in all_records("game"):
-        if game.get("sample") and game.get("sample_variant") == (
-            "outdoor" if outdoor else "indoor"
-        ):
-            return public_game(game)
-    path = DATA / (uuid.uuid4().hex + ".mp4")
-    shutil.copy2(source, path)
-    game = register_game(
-        path,
-        "TrackID3x3 · "
-        + ("outdoor full 3x3 court" if outdoor else "indoor fixed camera"),
-    )
-    game["sample"] = True
-    game["sample_variant"] = "outdoor" if outdoor else "indoor"
-    if outdoor:
-        game["court_polygon"] = OUTDOOR_SAMPLE_COURT
-    put("game", game["game_id"], game)
-    return public_game(game)
+    # Concurrent sample requests share one registered game and active/completed job.
+    with LOCK:
+        for game in all_records("game"):
+            if game.get("sample") and game.get("sample_variant") == (
+                "outdoor" if outdoor else "indoor"
+            ):
+                return ingested_game(game, auto_analyze)
+        path = DATA / (uuid.uuid4().hex + ".mp4")
+        try:
+            shutil.copy2(source, path)
+            game = register_game(
+                path,
+                "TrackID3x3 · "
+                + ("outdoor full 3x3 court" if outdoor else "indoor fixed camera"),
+            )
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
+        game["sample"] = True
+        game["sample_variant"] = "outdoor" if outdoor else "indoor"
+        if outdoor:
+            game["court_polygon"] = OUTDOOR_SAMPLE_COURT
+        put("game", game["game_id"], game)
+        return ingested_game(game, auto_analyze)
 
 
 class Cut(BaseModel):
