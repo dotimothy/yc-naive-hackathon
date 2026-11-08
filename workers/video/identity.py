@@ -243,3 +243,146 @@ class PlayerIdentityTracker:
             ambiguous_observations=self.ambiguous_observations,
             identity_confirmed=False,
         )
+
+
+def _tracklets(samples, key, aspect):
+    grouped = {}
+    for sample in samples:
+        grouped.setdefault(str(sample[key]), []).append(sample)
+    tracklets = {}
+    for name, items in grouped.items():
+        items.sort(key=lambda s: s["timestamp_ms"])
+        feet = [
+            np.array(
+                [
+                    (s["bbox"][0] + s["bbox"][2] / 2) * aspect,
+                    s["bbox"][1] + s["bbox"][3],
+                ]
+            )
+            for s in items
+        ]
+        velocity = np.zeros(2)
+        if len(items) >= 2:
+            dt = items[-1]["timestamp_ms"] - items[-2]["timestamp_ms"]
+            if dt > 0:
+                velocity = (feet[-1] - feet[-2]) / dt
+        tracklets[name] = dict(
+            start=items[0]["timestamp_ms"],
+            end=items[-1]["timestamp_ms"],
+            first=feet[0],
+            last=feet[-1],
+            velocity=velocity,
+            first_height=items[0]["bbox"][3],
+            last_height=items[-1]["bbox"][3],
+            observations=len(items),
+        )
+    return tracklets
+
+
+def propose_tracklet_merges(
+    samples,
+    descriptors=None,
+    teams=None,
+    key="track_id",
+    aspect=16 / 9,
+    max_gap_ms=3000,
+    appearance_gate=0.30,
+    margin=0.10,
+):
+    """Suggest which tracklets may be the same person, with evidence, for review.
+
+    ``samples`` use the pipeline format (normalized ``bbox`` [x, y, w, h],
+    ``timestamp_ms``, ``track_id``). Optional ``descriptors`` map tracklet IDs to a
+    representative uniform descriptor, and ``teams`` map them to TeamGrouper
+    assignments. A merge is only considered when the later tracklet starts after
+    the earlier one ends, motion and box size are consistent, appearance (when
+    known) is close and anonymous team labels do not conflict. Pairs are made
+    one-to-one; near ties are reported as ``ambiguous`` with alternatives.
+    Proposals are never confirmed identities and always require review.
+    """
+    tracklets = _tracklets(samples, key, aspect)
+    names = sorted(tracklets, key=lambda n: (tracklets[n]["start"], n))
+    descriptors = {str(k): v for k, v in (descriptors or {}).items()}
+    teams = {str(k): v for k, v in (teams or {}).items()}
+    evidence = {}
+    costs = np.full((len(names), len(names)), 100.0)
+    for i, a in enumerate(names):
+        for j, b in enumerate(names):
+            A, B = tracklets[a], tracklets[b]
+            gap = B["start"] - A["end"]
+            if a == b or gap <= 0 or gap > max_gap_ms:
+                continue
+            size = B["first_height"] / max(1e-6, A["last_height"])
+            if not 0.6 <= size <= 1.67:
+                continue
+            team_a = (teams.get(a) or {}).get("team", "unknown")
+            team_b = (teams.get(b) or {}).get("team", "unknown")
+            if "unknown" not in (team_a, team_b) and team_a != team_b:
+                continue
+            scale = (A["last_height"] + B["first_height"]) / 2
+            predicted = A["last"] + A["velocity"] * min(gap, 750)
+            displacement = float(np.linalg.norm(B["first"] - predicted)) / max(
+                scale, 1e-6
+            )
+            radius = 1.0 + 1.5 * min(gap / 1000, 2)
+            if displacement > radius:
+                continue
+            distance = appearance_distance(
+                _unit_or_none(descriptors.get(a)), _unit_or_none(descriptors.get(b))
+            )
+            if distance is not None and distance > appearance_gate:
+                continue
+            appearance_term = 0.5 if distance is None else distance / appearance_gate
+            costs[i, j] = 0.6 * displacement / radius + 0.4 * appearance_term
+            evidence[(i, j)] = dict(
+                gap_ms=round(gap),
+                displacement_heights=round(displacement, 3),
+                radius_heights=round(radius, 3),
+                size_ratio=round(size, 3),
+                appearance_distance=None if distance is None else round(distance, 4),
+                team_source=team_a,
+                team_target=team_b,
+                source_observations=A["observations"],
+                target_observations=B["observations"],
+            )
+    proposals = []
+    if evidence:
+        rows, cols = linear_sum_assignment(costs)
+        for i, j in zip(rows, cols):
+            value = costs[i, j]
+            if value >= 100:
+                continue
+            alternatives = [
+                names[r]
+                for r in range(len(names))
+                if r != i and costs[r, j] - value < margin
+            ] + [
+                names[c]
+                for c in range(len(names))
+                if c != j and costs[i, c] - value < margin
+            ]
+            proposals.append(
+                dict(
+                    source_track_id=names[i],
+                    target_track_id=names[j],
+                    status="ambiguous" if alternatives else "proposed",
+                    score=round(float(value), 4),
+                    alternatives=sorted(set(alternatives)),
+                    evidence=evidence[(i, j)],
+                    method="tracklet-merge-proposal-v1",
+                    identity_confirmed=False,
+                    requires_review=True,
+                )
+            )
+    proposals.sort(
+        key=lambda p: (tracklets[p["target_track_id"]]["start"], p["target_track_id"])
+    )
+    return proposals
+
+
+def _unit_or_none(vector):
+    if vector is None:
+        return None
+    vector = np.asarray(vector, dtype=np.float32).reshape(-1)
+    norm = float(np.linalg.norm(vector))
+    return vector / norm if norm > 0 else None
