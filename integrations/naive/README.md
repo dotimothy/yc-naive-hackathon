@@ -2,7 +2,24 @@
 
 Server-side TypeScript integration, separate from the Python GPU worker and React frontend. The SDK and CLI are pinned in package-lock.json; no platform credentials are stored in this repository.
 
-## Current status
+## Current integration
+
+The app uses an existing Naive company crew: CEO/Coordinator, Scout, Clipper, Caption Editor, Analyst, Channel Manager, and Outreach. The local dispatcher submits source-bound analysis evidence, validates structured outputs, and exposes activity on the Naive dashboard. Daily discovery and captioned quiz/story exports are implemented. Outreach handles inbound AgentMail conversations through a separately authenticated local worker.
+
+Start the configured local stack with `./run.sh` from the repository root. Fresh setup uses `./setup.sh`; private agent-version state and credentials are not committed. This command does not create a company, enable publishing, or activate email sending.
+
+- [Architecture](../../docs/html/architecture.html)
+- [Crew dashboard handoff](../../docs/NAIVE_TEAM_DASHBOARD_HANDOFF.md)
+- [Daily discovery operation](../../docs/DAILY_AUTONOMOUS_VIDEO.md)
+- [AgentMail worker setup](../agentmail/README.md)
+
+Social delivery depends on the existing publication policy and provider availability. Phase 1 video analysis and rendering remain local.
+
+## Historical single-agent onboarding
+
+The remaining onboarding commands describe the initial single-agent diagnostic; they do not represent the current crew architecture. The original status is retained below as historical evidence.
+
+### Initial onboarding snapshot
 
 - Authenticated to the operator's existing PlayLattice AI organization with its existing active plan; no subscription/top-up/plan changes were made.
 - Created `playlattice-clip-curator` using a catalog-verified `z-ai/glm-5.3-flash` model.

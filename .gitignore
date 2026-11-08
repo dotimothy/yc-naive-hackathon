@@ -26,3 +26,7 @@ data/
 
 # Optional isolated basketball detector environment
 .venv-ball/
+
+# Local agent worktrees and the explicitly published website demo
+.claude/worktrees/
+!docs/html/assets/playlattice-demo.mp4

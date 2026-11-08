@@ -26,6 +26,8 @@ The film room uses tabs for playback, players/highlights, camera shots, ball/hoo
 
 Jobs, review state and replayable updates persist in SQLite. Uploaded media, model weights and generated videos remain in ignored local storage.
 
+[Watch the two-minute demo](docs/html/index.html#demo) · [Documentation index](docs/README.md) · [Architecture](docs/html/architecture.html)
+
 ## Run locally
 
 From the repository root, install dependencies, model weights, and the sample once, then start the app:
