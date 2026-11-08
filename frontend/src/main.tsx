@@ -7,6 +7,7 @@ import { buildFrameIndex, FilmPlayer, formatMs, Timeline, trackColor, usePlayhea
 import { EVENT_TYPE_LABEL, HighlightsPanel } from './HighlightsPanel';
 import { BasketballPanel, type BallObject } from './BasketballPanel';
 import { LiveBoard } from './LiveBoard';
+import { NaiveDashboard } from './NaiveDashboard';
 import type { CameraShot, Clip, Game, GameEvent, Job } from './types';
 import { isTerminal, useGameRoom, type DelayStats } from './useGameRoom';
 import './styles.css';
@@ -64,10 +65,15 @@ function libraryBadge(job: Job | null | undefined): { cls: string; text: string 
   return { cls: 'failed', text: 'failed' };
 }
 
+const APP_VIEWS = [{ id: 'film', label: 'Film Room' }, { id: 'naive', label: 'Naive Crew' }] as const;
+type AppView = typeof APP_VIEWS[number]['id'];
+
 function App() {
   const [games, setGames] = useState<Game[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [view, setView] = useState<AppView>(() => (window.location.hash === '#naive' ? 'naive' : 'film'));
+  const changeView = (v: AppView) => { setView(v); window.history.replaceState(null, '', v === 'naive' ? '#naive' : window.location.pathname + window.location.search); };
 
   const loadGames = useCallback(async () => {
     try {
@@ -110,10 +116,14 @@ function App() {
           </div>
         </div>
         <div className="topbar-meta">
+          <div className="view-switch"><SectionTabs id="view" label="Workspace" tabs={APP_VIEWS} value={view} onChange={changeView} /></div>
           <span className="pill sport">Basketball</span>
         </div>
       </header>
-      <div className="layout">
+      <div className="naive-view" id="view-panel-naive" role="tabpanel" aria-labelledby="view-tab-naive" hidden={view !== 'naive'}>
+        <NaiveDashboard active={view === 'naive'} />
+      </div>
+      <div className="layout" id="view-panel-film" role="tabpanel" aria-labelledby="view-tab-film" hidden={view !== 'film'}>
         <aside className="sidebar">
           <IngestPanel onGame={addGame} />
           <section className="panel">
