@@ -55,14 +55,22 @@ body{font-family:var(--body)}
 .company-close h2{font:italic 800 clamp(34px,4vw,52px)/1.05 var(--display)}
 @media(max-width:760px){.company-title{font-size:clamp(58px,15vw,84px)}.company-hero h1{font-size:clamp(36px,10vw,54px)}.company-tagline{font-size:13px;letter-spacing:.17em}.company-description{font-size:16px}.company-loop{font-size:11px}.company-nav nav a{font-size:14px}}
 
-.sponsor-section { display:flex; flex-direction:column; gap:24px; margin-top:24px; }
-.sponsor-section h2 { font-size:30px; margin:8px 0; }
-.sponsor-logos { display:flex; flex-wrap:wrap; align-items:center; gap:28px 48px; }
-.sponsor-brand { display:inline-flex; align-items:center; gap:12px; text-decoration:none; font:700 26px var(--display); color:var(--text); }
-.sponsor-brand img { display:block; object-fit:contain; }
-.sponsor-agentmail { display:flex; align-items:center; flex-wrap:wrap; gap:16px; }
-.yc-company { border:1px solid var(--line-strong); padding:6px 10px; font-size:12px; color:var(--accent-2); text-decoration:none; }
-.sponsor-email { padding-top:24px; border-top:1px solid var(--line); }
-.sponsor-email h3 { margin:0 0 8px; }
-.sponsor-email p { color:var(--muted); margin:0 0 16px; }
-.sponsor-address { display:inline-block; margin:12px; font-size:14px; }
+/* Quiet partner strip, paired with the recommendation contact. */
+.sponsor-section { display:grid; grid-template-columns:1fr 1fr; align-items:center; gap:64px; border-top:1px solid var(--line); border-bottom:1px solid var(--line); padding:40px 0; margin-top:16px; }
+.sponsor-eyebrow { display:block; color:var(--muted); font:500 12px var(--body); letter-spacing:.12em; text-transform:uppercase; margin-bottom:20px; }
+.sponsor-logos { display:flex; align-items:center; gap:24px; min-height:52px; }
+.sponsor-naive { display:flex; align-items:center; gap:9px; text-decoration:none; color:var(--text); }
+.sponsor-naive > span { font:italic 500 30px Georgia,serif; letter-spacing:-.04em; }
+.sponsor-divider { height:28px; width:1px; background:var(--line-strong); }
+.sponsor-agentmail { display:grid; gap:7px; }
+.sponsor-agentmail img { display:block; width:139px; height:26px; }
+.yc-company { color:var(--muted); font:400 11px var(--body); text-decoration:none; padding-left:26px; }
+.yc-company:hover { color:var(--accent-2); }
+.sponsor-email { border-left:1px solid var(--line); padding-left:40px; }
+.sponsor-email .sponsor-eyebrow { margin-bottom:10px; }
+.sponsor-email h2 { font:500 24px/1.25 var(--body); letter-spacing:-.03em; margin:0 0 14px; text-transform:none; }
+.sponsor-contact { display:inline-flex; align-items:center; gap:20px; color:var(--accent-2); text-decoration:none; font:500 14px var(--body); }
+.sponsor-contact:hover { text-decoration:underline; text-underline-offset:5px; }
+.sponsor-address { display:block; font:400 12px var(--body); color:var(--muted); margin-top:7px; }
+.sponsor-section a:focus-visible { outline:2px solid var(--accent); outline-offset:6px; }
+@media(max-width:760px) { .sponsor-section { grid-template-columns:1fr; gap:30px; padding:30px 4px; } .sponsor-email { border-left:0; border-top:1px solid var(--line); padding:24px 0 0; } .sponsor-logos { gap:20px; } }

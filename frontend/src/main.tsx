@@ -205,14 +205,13 @@ function App() {
           )}
         </main>
       </div>
-      <footer className="sponsor-footer" aria-label="Sponsor Acknowledgements">
-        <div><strong>Sponsor Technologies</strong><span>With Thanks To Our Hackathon Sponsors</span></div>
-        <nav aria-label="Sponsor Websites">
-          <a href="https://usenaive.ai/docs/sdk/typescript" target="_blank" rel="noopener noreferrer"><img src="/sponsors/naive.svg" width={30} height={30} alt="" /> Naive SDK <span aria-hidden="true">↗</span></a>
-          <a href="https://www.agentmail.to/" target="_blank" rel="noopener noreferrer"><img src="/sponsors/agentmail.svg" width={143} height={27} alt="AgentMail" /><span aria-hidden="true">↗</span></a>
-          <a className="sponsor-yc" href="https://www.ycombinator.com/companies/agentmail" target="_blank" rel="noopener noreferrer">A YC Company</a>
-          <a href="mailto:playlattice@agentmail.to?subject=Basketball%20Video%20Recommendations">Email For Recommendations ↗</a>
-        </nav>
+      <footer className="sponsor-footer" aria-label="Sponsors and recommendations">
+        <div className="sponsor-partners"><span className="sponsor-caption">Built With</span><nav aria-label="Sponsor Websites">
+          <a className="sponsor-naive" href="https://usenaive.ai/" target="_blank" rel="noopener noreferrer" aria-label="Naive SDK"><img src="/sponsors/naive.svg" width={28} height={28} alt="" /><span>naïve</span></a>
+          <span className="sponsor-divider" aria-hidden="true" />
+          <div className="sponsor-agentmail"><a href="https://www.agentmail.to/" target="_blank" rel="noopener noreferrer"><img src="/sponsors/agentmail.svg" width={128} height={24} alt="AgentMail" /></a><a className="sponsor-yc" href="https://www.ycombinator.com/companies/agentmail" target="_blank" rel="noopener noreferrer">A YC Company</a></div>
+        </nav></div>
+        <div className="sponsor-recommend"><span>Good basketball. In your inbox.</span><a href="mailto:playlattice@agentmail.to?subject=Basketball%20Video%20Recommendations">Ask For Recommendations ↗</a><small>playlattice@agentmail.to</small></div>
       </footer>
     </div>
   );
