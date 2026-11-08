@@ -313,3 +313,7 @@
 .naive-stage-table td .status { display: inline-block; margin: 0 5px 4px 0; }
 .naive-stage-table tr.on { background: rgba(255,107,26,0.1); }
 .naive-stage-table button { text-align: left; }
+
+.naive-mailroom-summary { display:flex; gap:12px 24px; flex-wrap:wrap; margin:14px 0; align-items:center; }
+.naive-mailroom-summary > span { display:inline-flex; gap:8px; align-items:center; }
+.naive-mailroom summary { cursor:pointer; margin-top:12px; }

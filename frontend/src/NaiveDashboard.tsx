@@ -31,10 +31,11 @@ type Workflow = {
 type Budget = { monthly_cap_micro_usd?: number; per_video_cap_micro_usd?: number; accounted_micro_usd?: number };
 type CrewMember = { name?: string; role?: string; id?: string; session_count?: number };
 type Policy = { paused_until?: string; paused_reason?: string; enabled?: boolean; platform?: string; visibility?: string; stop_at?: string | number };
+type MailStatus = { worker?: string; updated_at?: string; last_success_at?: string; error_code?: number; ledger?: string; requests?: Record<string, number>; replies?: Record<string, number>; recent?: {id:string;status:string;created:number;updated:number}[] };
 type Pipeline = {
   updated_at?: string | number; batch: Batch | null; workflows: Workflow[]; budget: Budget | null;
   services: Record<string, string>; crew: CrewMember[]; policy: Policy | null;
-  team_activity: TeamActivity | null;
+  team_activity: TeamActivity | null; agentmail: MailStatus | null;
 };
 
 const obj = (v: unknown): Record<string, unknown> | null => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null);
@@ -59,6 +60,7 @@ function normalize(raw: unknown): Pipeline | null {
     crew: arr<CrewMember>(r.crew, () => true),
     policy: (obj(r.policy) as Policy | null) ?? null,
     team_activity: normalizeActivity(r.team_activity),
+    agentmail: obj(r.agentmail) as MailStatus | null,
   };
 }
 
@@ -404,6 +406,7 @@ export function NaiveDashboard({ active }: { active: boolean }) {
         <section className="panel"><p className="muted small">{conn === 'connecting' ? 'Waiting for the first pipeline snapshot…' : 'No pipeline data received yet. Nothing is shown until the endpoint reports it.'}</p></section>
       ) : (
         <div className={conn === 'live' ? 'naive-body' : 'naive-body dim'}>
+          <MailroomPanel mail={data.agentmail} outreach={data.services.outreach} now={now} />
           <details className="panel naive-more naive-flow-details">
             <summary><h3>Workflow Stages</h3><span className="muted small">View stage counts and filter videos</span></summary>
             <Flow data={data} focus={focus} setFocus={setFocus} blocked={postingBlocked} />
@@ -430,6 +433,26 @@ export function NaiveDashboard({ active }: { active: boolean }) {
       )}
     </div>
   );
+}
+
+function MailroomPanel({mail, outreach, now}: {mail: MailStatus | null; outreach?: string; now:number}) {
+  const requests = mail?.requests ?? {}, replies = mail?.replies ?? {};
+  const queued = (requests.queued ?? 0) + (requests.rendering ?? 0);
+  return <section className="panel naive-mailroom" aria-labelledby="mailroom-title">
+    <div className="panel-head"><div><h3 id="mailroom-title">AgentMail & Outreach</h3><p className="muted small">Inbound email → Naive outreach → source clip → preview reply</p></div><Status value={mail?.worker ?? 'unknown'} /></div>
+    <div className="naive-mailroom-summary">
+      <span>Outreach <Status value={outreach ?? 'unknown'} /></span>
+      <span><b>{queued}</b> Queued / Rendering</span><span><b>{requests.ready ?? 0}</b> Previews Ready</span>
+      <span><b>{replies.sent ?? 0}</b> Replies Sent</span><span><b>{requests.failed ?? 0}</b> Failed Clips</span>
+      <span><b>{(replies.pending ?? 0) + (replies.sending ?? 0)}</b> Replies Pending</span>
+    </div>
+    <p className="muted small">Worker checked {ago(toMs(mail?.updated_at),now)} · Last successful inbox poll {ago(toMs(mail?.last_success_at),now)}</p>
+    {mail?.worker === 'error' && <p className="alert warn">Inbox polling failed{mail.error_code ? ` (HTTP ${mail.error_code})` : ''}. The worker will retry.</p>}
+    {(!mail || ['unknown','stopped','stale'].includes(mail.worker ?? 'unknown')) && <p className="muted small">Worker health is {words(mail?.worker ?? 'unknown')}. Completed outreach sessions do not mean the inbox worker is online.</p>}
+    {mail?.ledger !== 'ok' && <p className="muted small">Request and reply counts are unavailable.</p>}
+    {(replies.needs_reconciliation ?? 0) > 0 && <p className="alert warn">{replies.needs_reconciliation} replies need delivery reconciliation.</p>}
+    {!!mail?.recent?.length && <details><summary>Recent Clip Requests</summary><div className="table-scroll"><table><thead><tr><th>Request</th><th>Status</th><th>Updated</th></tr></thead><tbody>{mail.recent.map(r=><tr key={r.id}><td><code>{r.id.slice(0,12)}</code></td><td><Status value={r.status} /></td><td>{ago(r.updated*1000,now)}</td></tr>)}</tbody></table></div></details>}
+  </section>;
 }
 
 function StatusBanner({ data, posting, focus, setFocus, stale }: {

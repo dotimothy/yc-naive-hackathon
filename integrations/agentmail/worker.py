@@ -100,6 +100,22 @@ def flush(room, mail):
             )
 
 
+def report_status(room, state, error_code=None):
+    path = room.folder / "status.json"
+    try:
+        previous = json.loads(path.read_text()) if path.exists() else {}
+    except (ValueError, OSError):
+        previous = {}
+    now = datetime.now(timezone.utc).isoformat()
+    value = {"pid": os.getpid(), "state": state, "updated_at": now,
+             "last_success_at": now if state == "idle" else previous.get("last_success_at"),
+             "error_code": error_code}
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(value))
+    temporary.chmod(0o600)
+    temporary.replace(path)
+
+
 def outreach_decision(room, message):
     if not (ROOT / "data/naive/outreach-agent.json").exists():
         return None
@@ -256,12 +272,15 @@ def main():
                 [sys.executable, "-m", "integrations.agentmail.worker", *sys.argv[1:]],
             )
         try:
+            report_status(room, "polling")
             result = tick(room, mail)
+            report_status(room, "idle")
             if result:
                 print(
                     json.dumps({"event": "clip_request", "status": result}), flush=True
                 )
         except httpx.HTTPStatusError as error:
+            report_status(room, "error", error.response.status_code)
             print(
                 json.dumps(
                     {
@@ -272,6 +291,7 @@ def main():
                 flush=True,
             )
         except Exception as error:
+            report_status(room, "error")
             print(
                 json.dumps(
                     {"event": "agentmail_worker_error", "type": type(error).__name__}
@@ -279,6 +299,7 @@ def main():
                 flush=True,
             )
         if args.once:
+            report_status(room, "stopped")
             break
         time.sleep(30)
 
