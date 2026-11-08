@@ -1,22 +1,92 @@
 # PlayLattice
 
-Private YC Naive Hackathon prototype; product name is PlayLattice.
+Turn basketball footage into a film room with player tracking, ball and hoop observations, reviewable basketball stats, and source-linked highlight clips.
 
-Build a sports video intelligence platform, starting with basketball. The first local workflow is video → pose/tracking → replay dashboard → source-verified clips, followed by private opt-in athlete profiles. Keep shared media processing reusable across sports; validate basketball first. Naive orchestration and sponsors follow after the local core is accepted.
+PlayLattice is being built for the YC Naive Hackathon. The local video workflow works today; Naive SDK orchestration and sponsor integrations are next. Basketball is the first supported sport.
 
-- [Camera cuts and gameplay review](docs/CAMERA_SHOTS.md)
-- [YOLO26 pose model validation](docs/YOLO26_POSE_VALIDATION.md)
+![PlayLattice dashboard: basketball replay with tracking overlays, player highlight cards, and clip review](docs/assets/dashboard.gif)
+
+*Recorded from the running app with real model predictions on the TrackID3x3 outdoor sample. Player labels are provisional; highlighted activity is not a verified basketball outcome. Footage: Kazuhiro Yamada et al., [TrackID3x3](https://github.com/open-starlab/TrackID3x3), CC BY 4.0; excerpted, resized and overlaid. [Capture details](docs/assets/README.md).*
+
+## What you can do
+
+- **Upload and analyze video.** Upload an authorized MP4 or load the included dataset sample. Analysis runs locally with automatic MPS, CUDA or CPU device selection. Cancel an active analysis from the dashboard.
+- **Review the film.** Replay video with timestamped player boxes, pose keypoints, and ball/hoop observations. Player and ball models share one decode loop.
+- **Correct player identity.** Inspect provisional track groups, group fragments after review, and split a track at an identity swap. Automatic IDs are not verified athlete identities.
+- **Generate player highlights.** Rank candidate footage by editorial highlight priority, render clips, seek back to the original video, and review the suggested plays. Clip exports are checked for decoding, source bounds, duration and first-frame alignment.
+- **Build evidence-backed stats.** Confirm the actor, event time and basketball outcome before an event contributes to a player's totals. Unknown shot values and uncertain or duplicate events remain unresolved. Totals cover reviewed evidence only.
+- **Handle camera changes.** Detect hard cuts, reset tracking across camera boundaries, and keep generated clips within a shot. Review provisional gameplay classifications and export individual shots.
+- **Process portrait footage.** A 9:16 crop has passed the complete analysis and clip-export flow. A narrow frame can lose players, the ball and surrounding play.
+
+Jobs, review state and replayable updates persist in SQLite. Uploaded media, model weights and generated videos remain in ignored local storage.
+
+## Run locally
+
+Requires Python, Node.js/npm, and FFmpeg/ffprobe. The current setup has been exercised on macOS arm64 with Python 3.9.6; see the [local setup guide](docs/LOCAL_PROTOTYPE.md) for platform notes.
+
+```sh
+# macOS: install FFmpeg if needed
+brew install ffmpeg
+
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python scripts/download_pose_model.py
+
+# Enable basketball-trained ball and hoop detection
+scripts/setup_ball_detector.sh
+
+# Download the short outdoor 3x3 sample
+.venv/bin/python scripts/download_sample.py --outdoor
+
+npm --prefix frontend ci
+npm --prefix frontend run build
+scripts/run_local.sh
+```
+
+Open **http://127.0.0.1:8000**, choose **Load TrackID3x3 Sample**, and start analysis. For your own footage, confirm that you are authorized to analyze it before uploading. Initial setup downloads dependencies and model weights; inference runs locally after setup.
+
+For frontend development, run `npm --prefix frontend run dev` alongside the API. Vite proxies `/api` to port 8000.
+
+## Models and current limits
+
+| Component | Active implementation |
+| --- | --- |
+| Player detection and pose | Pinned Ultralytics YOLO26n-pose; 17 keypoints; default stride 5 |
+| Ball and hoop detection | Basketball-trained E-BARD RF-DETR Nano; default stride 2 |
+| Identity and continuity | Conservative tracking and anonymous grouping, with reviewer corrections |
+| Highlights | Visual-activity heuristics and reviewer-confirmed outcomes, rendered with FFmpeg |
+| Storage and UI | FastAPI, SQLite, React, TypeScript and Vite |
+
+This is sampled video analysis, not demonstrated real-time game coverage. Model inference is the main runtime cost. Ball observations can be sparse, identities can swap or fragment, and hard-cut/gameplay heuristics need review. The current models have been checked on short indoor/outdoor 3x3 clips; this does not establish accuracy across full games, leagues or camera styles.
+
+We benchmarked basketball-trained YOLOv8n against RF-DETR on the same 264 frames and three-view settings on MPS. YOLO took 9.2 seconds versus RF-DETR's 62.5 seconds, but detected balls in only 39 frames versus 164 and hoops in zero frames versus 264. These are **detection coverage and detector timings, not accuracy or full-job latency**. RF-DETR remains active. Adaptive crop and cross-frame batching experiments are archived and are not enabled in production analysis. [Benchmark details](docs/EBARD_MODEL_BENCHMARK.md).
+
+Player scores express clip-review priority, not player ability. Official statistics, verified rosters, private athlete profiles, automatic jersey identification, recruiting workflows, Naive orchestration and sponsor plugins are not implemented.
+
+## Checks
+
+```sh
+.venv/bin/python -m pytest backend/tests -q
+.venv/bin/ruff check backend workers scripts
+npm --prefix frontend run build
+```
+
+The current backend suite has 183 passing tests. UI readability was checked in desktop and mobile Chrome. Real-video inference and export checks are separate from unit tests; passing software checks does not establish basketball recognition accuracy.
+
+## Further reading
+
+- [Local setup and operation](docs/LOCAL_PROTOTYPE.md)
 - [Unified player and ball analysis](docs/UNIFIED_ANALYSIS.md)
+- [Camera cuts and gameplay review](docs/CAMERA_SHOTS.md)
 - [Reviewed basketball statistics and attribution](docs/REVIEWED_STATS_CONTRACT.md)
-- [Ball and hoop detector setup and limitations](docs/BALL_HOOP_HANDOFF.md)
-- [Tracking held-out evaluation](docs/TRACKING_HANDOFF.md)
-- [Player highlight scoring and automatic clips](docs/HIGHLIGHT_SCORING.md)
+- [Highlight scoring and clips](docs/HIGHLIGHT_SCORING.md)
+- [Tracking evaluation](docs/TRACKING_HANDOFF.md)
+- [YOLO26 pose validation and tradeoffs](docs/YOLO26_POSE_VALIDATION.md)
 - [GPU acceleration and CUDA worker setup](docs/ACCELERATION.md)
-- [Run the local prototype](docs/LOCAL_PROTOTYPE.md)
-- [Agent instructions and ownership](AGENTS.md)
-- [Prototype workstreams and acceptance](docs/PROTOTYPE_PLAN.md)
-- [Shared API and worker contract](docs/API_CONTRACT.md)
-- [TrackID3x3 dataset findings and analysis commands](docs/datasets/TRACKID3X3.md)
+- [Ball model benchmark](docs/EBARD_MODEL_BENCHMARK.md), [crop experiments](docs/BALL_PERFORMANCE_PLAN.md), [batching experiments](docs/BALL_BATCHING_RESULTS.md)
+- [API and worker contract](docs/API_CONTRACT.md)
+- [TrackID3x3 findings and attribution](docs/datasets/TRACKID3X3.md)
+- [Agent instructions](AGENTS.md) and [implementation plan](docs/PROTOTYPE_PLAN.md)
 - [Planning document](https://docs.google.com/document/d/1kEtq_jr14fybmyRyH_d0h5GALDyeX0YExyt-AdtnJrM/edit)
 
-Current status: local FastAPI/SQLite video pipeline and React film viewer. Accelerated pose/tracking, replayable updates, explainable highlight scores and automatic source-checked clips; preferred sample is a stationary outdoor view of the full 3x3 court. See the local quickstart for setup and current limitations.
+The repository is private. Model, runtime and dataset terms are separate: Ultralytics YOLO26n-pose uses AGPL-3.0 or an Enterprise license; E-BARD model weights are labeled CC BY 4.0; RF-DETR code is Apache 2.0. See the pinned download manifests and linked model documentation for provenance.
