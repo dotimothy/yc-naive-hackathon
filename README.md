@@ -10,6 +10,8 @@ PlayLattice is being built for the YC Naive Hackathon. The local video workflow 
 
 ## What you can do
 
+The film room uses tabs for playback, players/highlights, camera shots, ball/hoop evidence, clips and analysis details. Player groups are searchable in a paginated stats table; detailed evidence opens on demand. Review drafts and the video playhead persist when switching sections.
+
 - **Upload and analyze video.** Upload an authorized MP4 or load the included dataset sample. Analysis runs locally with automatic MPS, CUDA or CPU device selection. Cancel an active analysis from the dashboard.
 - **Review the film.** Replay video with timestamped player boxes, pose keypoints, and ball/hoop observations. Player and ball models share one decode loop.
 - **Correct player identity.** Inspect provisional track groups, group fragments after review, and split a track at an identity swap. Automatic IDs are not verified athlete identities.

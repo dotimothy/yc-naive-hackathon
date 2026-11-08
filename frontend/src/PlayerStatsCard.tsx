@@ -53,7 +53,7 @@ function shooting(made: number, att: number): { value: string; sub: string } {
   return { value: `${made}/${att}`, sub: `${Math.round((made / att) * 100)}% of reviewed` };
 }
 
-function statCells(s: BasketballStats | null | undefined): Cell[] {
+export function statCells(s: BasketballStats | null | undefined): Cell[] {
   const live = !!s?.has_evidence;
   const count = (n: unknown) => (live ? String(num(n)) : DASH);
   const fg = live ? shooting(num(s!.field_goals_made), num(s!.field_goals_attempted)) : { value: DASH, sub: '' };

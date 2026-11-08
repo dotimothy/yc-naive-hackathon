@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError } from './api';
 import { formatMs, trackColor } from './FilmPlayer';
-import { PlayerStatsCard, heldReasonText } from './PlayerStatsCard';
+import { heldReasonText } from './PlayerStatsCard';
+import { PlayerHighlightsTable } from './PlayerHighlightsTable';
+import { SectionTabs } from './SectionTabs';
 import type {
   IdentityMergeSuggestion,
   HighlightBundle,
@@ -165,9 +167,13 @@ function HighlightsPanelInner({ gameId, jobId, analysisActive, onSeek, onUpdated
   const [drafts, setDrafts] = useState<Record<string, ReviewDraft>>({});
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [playerFilter, setPlayerFilter] = useState<string | null>(null);
-  const [candidateLimit, setCandidateLimit] = useState(6);
+  const [candidatePage, setCandidatePage] = useState(0);
   const [showAllTracks, setShowAllTracks] = useState(false);
-  useEffect(() => setCandidateLimit(6), [playerFilter]);
+  const [view, setView] = useState<'players' | 'candidates' | 'identity'>('players');
+  useEffect(() => {
+    document.querySelectorAll<HTMLVideoElement>('.highlights [role="tabpanel"][hidden] video').forEach(video => video.pause());
+  }, [view]);
+  useEffect(() => setCandidatePage(0), [playerFilter]);
 
   // Group mapping form.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -470,6 +476,8 @@ function HighlightsPanelInner({ gameId, jobId, analysisActive, onSeek, onUpdated
   // ----- render -----
   const status: HighlightStatus = bundle?.status ?? 'not_generated';
   const filterPlayer = playerFilter ? playerById.get(playerFilter) : undefined;
+  const candidatePages = Math.max(1, Math.ceil(candidates.length / 3));
+  const currentCandidatePage = Math.min(candidatePage, candidatePages - 1);
 
   return (
     <section className="panel highlights">
@@ -531,24 +539,20 @@ function HighlightsPanelInner({ gameId, jobId, analysisActive, onSeek, onUpdated
         <p className="muted small hl-empty">Highlights unavailable.</p>
       ) : (
         <>
+          <SectionTabs id="highlight" label="Highlight review sections" value={view} onChange={setView} tabs={[
+            { id: 'players', label: 'Players' }, { id: 'candidates', label: 'Candidate review' }, { id: 'identity', label: 'Identity corrections' },
+          ]} />
+          <div id="highlight-panel-players" role="tabpanel" aria-labelledby="highlight-tab-players" hidden={view !== 'players'}>
           <div className="panel-head hl-section"><h4>Reviewed basketball evidence</h4><label className="toggle"><input type="checkbox" checked={showAllTracks} onChange={e => setShowAllTracks(e.target.checked)} /> Show all {players.length} track groups</label></div>
           {players.length === 0 ? (
             <p className="muted small">{status === 'not_generated' ? 'No highlight analysis yet. Click Generate highlights.' : 'No track groups with enough evidence.'}</p>
           ) : (
-            <div className="hl-players">
-              {players.filter(p => showAllTracks || p.candidate_count > 0 || p.identity_confirmed || !!p.basketball_stats?.has_evidence).map((p) => (
-                <PlayerStatsCard
-                  key={p.player_id}
-                  player={p}
-                  active={playerFilter === p.player_id}
-                  onFilter={() => setPlayerFilter(playerFilter === p.player_id ? null : p.player_id)}
-                  onGroup={p.identity_confirmed ? undefined : () => addTracksToForm(p.track_ids)}
-                  canGroup={canMutate}
-                  onSeek={onSeek}
-                  candidateById={candidateById}
-                />
-              ))}
-            </div>
+            <PlayerHighlightsTable
+              players={players.filter(p => showAllTracks || p.candidate_count > 0 || p.identity_confirmed || !!p.basketball_stats?.has_evidence)}
+              activeId={playerFilter} canGroup={canMutate} candidateById={candidateById} onSeek={onSeek}
+              onReview={id => { setPlayerFilter(id); setView('candidates'); }}
+              onGroup={tracks => { addTracksToForm(tracks); setView('identity'); }}
+            />
           )}
           {!statsAvailable && players.length > 0 && (
             <p className="alert warn">Reviewed basketball stats are unavailable for this highlight data (older format). Stat lines show as unavailable; no rating is shown in their place.</p>
@@ -559,6 +563,8 @@ function HighlightsPanelInner({ gameId, jobId, analysisActive, onSeek, onUpdated
             not minutes played. Cards are ordered by amount of reviewed evidence, then confirmed groups, then observed duration.
           </p>
 
+          </div>
+          <div id="highlight-panel-candidates" role="tabpanel" aria-labelledby="highlight-tab-candidates" hidden={view !== 'candidates'}>
           <div className="panel-head hl-section">
             <h4>Candidates ({candidates.length}{filterPlayer ? ` · ${filterPlayer.label}` : ''})</h4>
             {filterPlayer && <button className="ghost small" onClick={() => setPlayerFilter(null)}>Show all</button>}
@@ -567,7 +573,7 @@ function HighlightsPanelInner({ gameId, jobId, analysisActive, onSeek, onUpdated
             <p className="muted small">No candidates{filterPlayer ? ' for this group' : ''}.</p>
           ) : (
             <ul className="hl-cands">
-              {candidates.slice(0, candidateLimit).map((c) => (
+              {candidates.slice(currentCandidatePage * 3, currentCandidatePage * 3 + 3).map((c) => (
                 <CandidateRow
                   key={c.candidate_id}
                   candidate={c}
@@ -592,7 +598,13 @@ function HighlightsPanelInner({ gameId, jobId, analysisActive, onSeek, onUpdated
             </ul>
           )}
 
-          {candidates.length > candidateLimit && <button className="secondary small" onClick={() => setCandidateLimit(n => n + 6)}>Show more candidates ({candidates.length - candidateLimit} remaining)</button>}
+          {candidates.length > 0 && <div className="table-pagination">
+            <span>Candidates {currentCandidatePage * 3 + 1}–{Math.min((currentCandidatePage + 1) * 3, candidates.length)} of {candidates.length}</span>
+            <button className="secondary small" disabled={currentCandidatePage === 0} onClick={() => setCandidatePage(currentCandidatePage - 1)}>Previous candidates</button>
+            <button className="secondary small" disabled={currentCandidatePage + 1 >= candidatePages} onClick={() => setCandidatePage(currentCandidatePage + 1)}>Next candidates</button>
+          </div>}
+          </div>
+          <div id="highlight-panel-identity" role="tabpanel" aria-labelledby="highlight-tab-identity" hidden={view !== 'identity'}>
           <div className="hl-mapping">
             <h4 className="hl-section">Uncertain fragment pairings</h4>
             <p className="muted small">Possible reconnections remain separate. Check both source fragments, then choose a pairing to load into the correction form below. Saving still requires your confirmation. Costs are matching heuristics, not probabilities.</p>
@@ -661,6 +673,7 @@ function HighlightsPanelInner({ gameId, jobId, analysisActive, onSeek, onUpdated
               </div>
               {formError && <div className="alert error">{formError}</div>}
             </form>
+          </div>
           </div>
         </>
       )}

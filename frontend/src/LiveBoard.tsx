@@ -166,7 +166,7 @@ export function LiveBoard(props: {
         <b>{Math.round(pct)}%<small> Film Processed</small></b>
       </div>
 
-      <div className="leaders">
+      <details className="leaders"><summary>Film review queue</summary>
         <div className="leaders-head">
           <h3>Film Review Queue</h3>
           <div className="seg-toggle" role="tablist">
@@ -214,7 +214,7 @@ export function LiveBoard(props: {
             : 'Screen time = sampled frames where the player/track was detected × sampling interval. Not minutes played; tracks can include referees or spectators.'}{' '}
           Labels are provisional unless confirmed by a reviewer. Click a row to isolate it on film.
         </p>
-      </div>
+      </details>
     </section>
   );
 }

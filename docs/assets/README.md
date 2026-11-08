@@ -1,9 +1,9 @@
 # Dashboard capture
 
 `dashboard.gif` records the running PlayLattice dashboard on 2026-11-07, after the
-player-highlight readability update (`833c8de`). It shows outdoor sample replay
+tabbed film-room and player-table update. It shows outdoor sample replay
 with actual sampled tracking/pose and ball/hoop overlays, followed by the player
-cards and highlight review interface. No stats or identities were fabricated and
+table and candidate review tabs. No stats or identities were fabricated and
 no review decisions were changed for the recording. The outdoor game uses its
 existing persisted analysis, so the job panel shows that historical run's model
 and timings; it is not a fresh benchmark of the currently configured YOLO26 pose model.

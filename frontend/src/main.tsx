@@ -1,3 +1,4 @@
+import { SectionTabs } from './SectionTabs';
 import { ShotSegmentsPanel } from './ShotSegmentsPanel';
 import { StrictMode, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -172,8 +173,16 @@ function IngestPanel({ onGame }: { onGame: (g: Game) => void }) {
   );
 }
 
+const ROOM_TABS = [
+  { id: 'film', label: 'Film' }, { id: 'highlights', label: 'Players & highlights' },
+  { id: 'shots', label: 'Camera shots' }, { id: 'ball', label: 'Ball & hoop' },
+  { id: 'clips', label: 'Clips' }, { id: 'analysis', label: 'Analysis details' },
+] as const;
+type RoomTab = typeof ROOM_TABS[number]['id'];
+
 function GameRoom({ game }: { game: Game }) {
   const room = useGameRoom(game.game_id);
+  const [tab, setTab] = useState<RoomTab>('film');
   const videoRef = useRef<HTMLVideoElement>(null);
   const playheadMs = usePlayhead(videoRef);
   const [correctionError, setCorrectionError] = useState('');
@@ -204,17 +213,22 @@ function GameRoom({ game }: { game: Game }) {
     [game.duration_ms],
   );
 
-  // Seek and bring the film into view (highlight review sits below the player).
+  // Seeking from any review tab returns to the film without remounting the video.
   const seekAndShow = useCallback(
     (ms: number, trackId?: string) => {
+      setTab('film');
       seek(ms);
       if (trackId) setSelectedTrack(trackId);
-      videoRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      requestAnimationFrame(() => videoRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
     },
     [seek],
   );
 
   // Read on demand so the highlights panel does not re-render at playback rate.
+  useEffect(() => {
+    document.querySelectorAll<HTMLVideoElement>('.room [role="tabpanel"][hidden] video').forEach(video => video.pause());
+  }, [tab]);
+
   const getPlayheadMs = useCallback(() => Math.round((videoRef.current?.currentTime ?? 0) * 1000), []);
 
   const { refresh } = room;
@@ -272,6 +286,8 @@ function GameRoom({ game }: { game: Game }) {
         <div className="alert warn">Live update stream is {room.streamState === 'closed' ? 'closed' : 'reconnecting'}; job status falls back to polling. Data refreshes on reconnect.</div>
       )}
 
+      <SectionTabs id="room" label="Film room sections" tabs={ROOM_TABS} value={tab} onChange={setTab} />
+      <div id="room-panel-film" role="tabpanel" aria-labelledby="room-tab-film" hidden={tab !== 'film'}>
       <div className="room-grid">
         <section className="panel film">
           <FilmPlayer game={game} videoRef={videoRef} playheadMs={playheadMs} index={index} showBoxes={showBoxes} showPose={showPose} selectedTrack={selectedTrack} objects={showObjects ? ballObjects : []} shots={shotSegments} />
@@ -309,7 +325,7 @@ function GameRoom({ game }: { game: Game }) {
         </section>
 
         <div className="side-col">
-          <JobPanel job={room.activeJob} jobs={room.jobs} loaded={room.loaded} refreshing={room.refreshing} progress={room.progress} durationMs={game.duration_ms} sampleCount={room.tracks.size} trackCount={index.trackIds.length} delay={room.delayStats} ignored={room.ignored} />
+
           {index.trackIds.length > 0 && (
             <section className="panel">
               <h3>Temporary Tracks</h3>
@@ -327,20 +343,28 @@ function GameRoom({ game }: { game: Game }) {
         </div>
       </div>
 
+      </div>
+      <div id="room-panel-shots" role="tabpanel" aria-labelledby="room-tab-shots" hidden={tab !== 'shots'}>
       <ShotSegmentsPanel onShots={setShotSegments} gameId={game.game_id} jobId={job?.job_id ?? null} jobStatus={job?.status} analysisActive={active} refreshKey={highlightsRevision} onSeek={(ms) => { setSelectedTrack(null); seekAndShow(ms); }} onUpdated={() => { refreshRoom(); setHighlightsRevision(v => v + 1); }} />
 
+      </div>
+      <div id="room-panel-ball" role="tabpanel" aria-labelledby="room-tab-ball" hidden={tab !== 'ball'}>
       <BasketballPanel analysisStatus={job?.status} refreshKey={highlightsRevision} gameId={game.game_id} jobId={job?.job_id ?? null} analysisActive={active} tracks={index.trackIds} onSeek={seekAndShow} onObjects={setBallObjects} onImported={() => { setHighlightsRevision(v => v + 1); refreshRoom(); }} />
 
+      </div>
+      <div id="room-panel-highlights" role="tabpanel" aria-labelledby="room-tab-highlights" hidden={tab !== 'highlights'}>
       {job?.status !== 'cancelled' && job?.status !== 'cancelling' && <HighlightsPanel identityMergeSuggestions={job?.report?.identity_merge_suggestions} refreshKey={highlightsRevision} gameId={game.game_id} jobId={job?.job_id ?? null} analysisActive={active} onSeek={seekAndShow} onUpdated={() => { refreshRoom(); setHighlightsRevision(v => v + 1); }} getPlayheadMs={getPlayheadMs} />}
+      {(job?.status === 'cancelled' || job?.status === 'cancelling') && <p className="panel muted">Highlights will be available after a completed analysis.</p>}
 
-      <ClipsPanel clips={clips} events={events} job={job} onSeek={seek} />
+      </div>
+      <div id="room-panel-clips" role="tabpanel" aria-labelledby="room-tab-clips" hidden={tab !== 'clips'}>
+      <ClipsPanel clips={clips} events={events} job={job} onSeek={seekAndShow} />
+      </div>
+      <div id="room-panel-analysis" role="tabpanel" aria-labelledby="room-tab-analysis" hidden={tab !== 'analysis'}>
+          <JobPanel job={room.activeJob} jobs={room.jobs} loaded={room.loaded} refreshing={room.refreshing} progress={room.progress} durationMs={game.duration_ms} sampleCount={room.tracks.size} trackCount={index.trackIds.length} delay={room.delayStats} ignored={room.ignored} />
+      </div>
 
-      <section className="panel">
-        <h3>Profiles</h3>
-        <p className="muted small">
-          No athlete profiles exist yet. Profiles will require a verified roster mapping and explicit consent; tracks are never auto-linked to people.
-        </p>
-      </section>
+
     </div>
   );
 }
@@ -494,6 +518,10 @@ function clipDescription(c: Clip, ev: GameEvent | undefined): string {
 }
 
 function ClipsPanel({ clips, events, job, onSeek }: { clips: Clip[]; events: Record<string, GameEvent>; job: Job | null; onSeek: (ms: number) => void }) {
+  const [page, setPage] = useState(0);
+  useEffect(() => setPage(0), [job?.job_id]);
+  const pages = Math.max(1, Math.ceil(clips.length / 4));
+  const current = Math.min(page, pages - 1);
   return (
     <section className="panel">
       <div className="panel-head">
@@ -506,7 +534,7 @@ function ClipsPanel({ clips, events, job, onSeek }: { clips: Clip[]; events: Rec
         </p>
       ) : (
         <div className="clips">
-          {clips.map((c, i) => {
+          {clips.slice(current * 4, current * 4 + 4).map((c, i) => {
             const ev = c.event_id ? events[c.event_id] : undefined;
             const highlight = c.kind === 'highlight';
             return (
@@ -515,7 +543,7 @@ function ClipsPanel({ clips, events, job, onSeek }: { clips: Clip[]; events: Rec
                 <div className="clip-body">
                   <div className="clip-title">
                     <strong>
-                      {highlight ? 'Highlight Pick' : `Clip ${i + 1}`}
+                      {highlight ? 'Highlight Pick' : `Clip ${current * 4 + i + 1}`}
                       {c.track_id ? <code className="clip-track"> T{c.track_id}</code> : null}
                     </strong>
                     <span className={`qa ${c.qa_status === 'passed' ? 'ok' : 'bad'}`}>QA {c.qa_status}</span>
@@ -546,6 +574,10 @@ function ClipsPanel({ clips, events, job, onSeek }: { clips: Clip[]; events: Rec
           })}
         </div>
       )}
+      {clips.length > 0 && <div className="table-pagination"><span>Clips {current * 4 + 1}–{Math.min((current + 1) * 4, clips.length)} of {clips.length}</span>
+        <button className="secondary small" disabled={current === 0} onClick={() => setPage(current - 1)}>Previous clips</button>
+        <button className="secondary small" disabled={current + 1 >= pages} onClick={() => setPage(current + 1)}>Next clips</button>
+      </div>}
     </section>
   );
 }
