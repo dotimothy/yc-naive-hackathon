@@ -154,6 +154,14 @@ def test_review_mapping_generation_and_persistence(client, video):
         == 422
     )
     assert client.put(url + "/players", json={"players": [group]}).status_code == 200
+    # Changing the attribution invalidates the old actor approval; explicitly review again.
+    assert (
+        client.put(
+            url + "/candidates/" + candidate["candidate_id"] + "/review",
+            json={"decision": "approved", "event_type": "made_shot"},
+        ).status_code
+        == 200
+    )
     headers = {"Idempotency-Key": "generate-first"}
     response = client.post(
         url, json={"max_clips": 1, "top_per_player": 1}, headers=headers

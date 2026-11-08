@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type RefObject } from 'react';
+import type { BallObject } from './BasketballPanel';
 import type { Clip, Game, TrackSample } from './types';
 
 /** Overlay only shows a sampled frame if it is at most this far before the playhead. */
@@ -118,10 +119,11 @@ type PlayerProps = {
   index: FrameIndex;
   showBoxes: boolean;
   showPose: boolean;
+  objects?: BallObject[];
   selectedTrack: string | null;
 };
 
-export function FilmPlayer({ game, videoRef, playheadMs, index, showBoxes, showPose, selectedTrack }: PlayerProps) {
+export function FilmPlayer({ game, videoRef, playheadMs, index, showBoxes, showPose, selectedTrack, objects = [] }: PlayerProps) {
   const [videoError, setVideoError] = useState<string | null>(null);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const W = game.width || natural?.w || 16;
@@ -129,6 +131,9 @@ export function FilmPlayer({ game, videoRef, playheadMs, index, showBoxes, showP
   const sampleTime = nearestPriorSample(index.times, playheadMs);
   const samples = sampleTime === null ? [] : index.byTime.get(sampleTime) ?? [];
   const visible = selectedTrack ? samples.filter((s) => s.track_id === selectedTrack) : samples;
+  const objectIndex = useMemo(() => { const times = [...new Set(objects.map(o => o.timestamp_ms))].sort((a,b) => a-b); const byTime = new Map<number, BallObject[]>(); for (const o of objects) byTime.set(o.timestamp_ms, [...(byTime.get(o.timestamp_ms) ?? []), o]); return { times, byTime }; }, [objects]);
+  const objectTime = nearestPriorSample(objectIndex.times, playheadMs);
+  const visibleObjects = objectTime !== null && playheadMs - objectTime <= 200 ? objectIndex.byTime.get(objectTime) ?? [] : [];
   const mismatch = natural && game.width && Math.abs(natural.w / natural.h - game.width / game.height) > 0.01;
   const font = H * 0.024;
 
@@ -148,16 +153,22 @@ export function FilmPlayer({ game, videoRef, playheadMs, index, showBoxes, showP
           onError={() => setVideoError('Source video could not be loaded from the local API.')}
         />
         <svg className="overlay" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
+          {visibleObjects.map((o, i) => { const [x,y,w,h] = o.bbox; const color = o.class_name === 'basketball' ? '#ffe45c' : '#56e7ff'; return <g key={`object-${i}`}><rect x={x*W} y={y*H} width={w*W} height={h*H} fill="none" stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke"/><text x={x*W} y={Math.max(font,y*H-4)} fill={color} fontSize={font}>{o.class_name}?</text></g>; })}
           {visible.map((s) => {
             const color = trackColor(s.player_id ?? s.track_id);
-            const label = s.player_label ?? `T${s.track_id}`;
+            const tags = [
+              s.team_label === 'Team A' ? 'A?' : s.team_label === 'Team B' ? 'B?' : null,
+              s.role_status === 'likely_non_player' ? 'non-player?' : s.role_status === 'review_required' ? 'role?' : null,
+            ].filter(Boolean);
+            const flagged = s.role_status === 'likely_non_player' || s.role_status === 'review_required';
+            const label = `${s.player_label ?? `T${s.track_id}`}${tags.length ? ` ${tags.join(' ')}` : ''}`;
             const [x, y, w, h] = s.bbox;
             const pts = new Map(s.keypoints.map((k) => [k.name, k]));
             return (
               <g key={s.track_id}>
                 {showBoxes && (
                   <>
-                    <rect x={x * W} y={y * H} width={w * W} height={h * H} fill="none" stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke" />
+                    <rect x={x * W} y={y * H} width={w * W} height={h * H} fill="none" stroke={color} strokeWidth={2} strokeDasharray={flagged ? '6 4' : undefined} vectorEffect="non-scaling-stroke" />
                     <rect x={x * W} y={y * H - font * 1.3} width={font * 0.62 * (`${label} ${s.confidence.toFixed(2)}`.length + 1)} height={font * 1.3} fill={color} opacity={0.85} />
                     <text x={x * W + font * 0.3} y={y * H - font * 0.35} fontSize={font} fill="#0b0d10" fontWeight={700}>
                       {label} {s.confidence.toFixed(2)}

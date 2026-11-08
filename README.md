@@ -1,9 +1,12 @@
-# ScoutFilm / PlayLattice
+# PlayLattice
 
-Private YC Naive Hackathon prototype; product name is provisional.
+Private YC Naive Hackathon prototype; product name is PlayLattice.
 
 Build a sports video intelligence platform, starting with basketball. The first local workflow is video → pose/tracking → replay dashboard → source-verified clips, followed by private opt-in athlete profiles. Keep shared media processing reusable across sports; validate basketball first. Naive orchestration and sponsors follow after the local core is accepted.
 
+- [Reviewed basketball statistics and attribution](docs/REVIEWED_STATS_CONTRACT.md)
+- [Ball and hoop detector setup and limitations](docs/BALL_HOOP_HANDOFF.md)
+- [Tracking held-out evaluation](docs/TRACKING_HANDOFF.md)
 - [Player highlight scoring and automatic clips](docs/HIGHLIGHT_SCORING.md)
 - [GPU acceleration and CUDA worker setup](docs/ACCELERATION.md)
 - [Run the local prototype](docs/LOCAL_PROTOTYPE.md)

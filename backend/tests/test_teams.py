@@ -164,3 +164,27 @@ def test_colour_outlier_alone_never_flags_and_court_polygon_is_optional_evidence
     flags = flag_non_players(courtside, court_polygon=court)
     assert flags["courtside"]["role_status"] == "likely_non_player"
     assert "outside_court" in flags["courtside"]["signals"]
+
+
+def test_stationary_on_court_player_is_only_review_required_never_excluded():
+    court = [[0.1, 0.3], [0.9, 0.3], [0.9, 0.95], [0.1, 0.95]]
+    standing = track(
+        "defender", [(0.5, 0.5)] * 24
+    )  # waiting at the elbow, inside court
+    snapshot = [dict(s, bbox=list(s["bbox"])) for s in standing]
+    flags = flag_non_players(standing, court_polygon=court)
+    assert flags["defender"]["role_status"] == "review_required"
+    assert flags["defender"]["signals"] == ["stationary"]
+    assert standing == snapshot  # flags never remove or edit samples
+
+
+def test_active_player_at_frame_edge_is_not_flagged_as_non_player():
+    # Running along the near sideline with the box clipped by the image border.
+    edge = track("wing", [(0.0, 0.3 + 0.02 * i) for i in range(20)])
+    flags = flag_non_players(edge)
+    assert flags["wing"]["role_status"] == "review_required"
+    assert flags["wing"]["signals"] == ["frame_edge"]
+    crouched = track(
+        "guard", [(0.3 + 0.02 * i, 0.5) for i in range(20)], size=(0.09, 0.2)
+    )
+    assert flag_non_players(crouched)["guard"]["role_status"] == "review_required"

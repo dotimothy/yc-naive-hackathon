@@ -4,8 +4,19 @@ from collections import defaultdict
 import math
 import numpy as np
 from workers.render.media import render_clip, verify_clip
+from workers.video.reviewed_stats import attach_basketball_stats
 
-EVENT_WEIGHTS = {"made_shot": 90, "assist": 85, "rebound": 70, "steal": 85, "block": 85}
+EVENT_WEIGHTS = {
+    "made_shot": 90,
+    "made_free_throw": 45,
+    "missed_shot": 15,
+    "missed_free_throw": 10,
+    "turnover": 10,
+    "assist": 85,
+    "rebound": 70,
+    "steal": 85,
+    "block": 85,
+}
 SCORING_VERSION = "visual-v1"
 
 
@@ -156,6 +167,19 @@ def summarize(bundle, groups=None, reviews=None):
             ),
         )
         player["track_ids"].append(track_id)
+        player["team_label"] = (
+            track_stats[track_id].get("team_label", "unknown")
+            if len(player["track_ids"]) == 1
+            else player.get("team_label")
+            if player.get("team_label")
+            == track_stats[track_id].get("team_label", "unknown")
+            else "unknown"
+        )
+        role = track_stats[track_id].get("role_status", "unknown")
+        if role != "unknown":
+            player["role_status"] = "review_required"
+        else:
+            player.setdefault("role_status", "unknown")
         if track_id not in manual:
             player["identity_confirmed"] = False
         # Union times below prevents simultaneous fragments from inflating observed time.
@@ -186,7 +210,7 @@ def summarize(bundle, groups=None, reviews=None):
         players.values(), key=lambda p: (not p["identity_confirmed"], p["label"])
     )
     bundle["roster_groups"] = groups
-    return bundle
+    return attach_basketball_stats(bundle)
 
 
 def build_highlights(
@@ -200,7 +224,11 @@ def build_highlights(
     stats = {}
     for track_id, by_time in sorted(tracks.items()):
         ordered = [by_time[t] for t in sorted(by_time)]
-        stats[track_id] = {"timestamps": sorted(by_time)}
+        stats[track_id] = {
+            "timestamps": sorted(by_time),
+            "team_label": ordered[-1].get("team_label", "unknown"),
+            "role_status": ordered[-1].get("role_status", "unknown"),
+        }
         segments = []
         for sample in ordered:
             if (
@@ -387,7 +415,20 @@ def render_highlights(source, output_dir, bundle, game_id, emit):
             spotlight_applied=bool(candidate.get("spotlight")),
             generation_id=bundle["generation_id"],
             track_id=candidate["track_id"],
-            player_id=candidate["player_id"],
+            player_id=candidate["player_id"]
+            if next(
+                p["identity_confirmed"]
+                for p in bundle["players"]
+                if p["player_id"] == candidate["player_id"]
+            )
+            else None,
+            attribution_status="confirmed"
+            if next(
+                p["identity_confirmed"]
+                for p in bundle["players"]
+                if p["player_id"] == candidate["player_id"]
+            )
+            else "unconfirmed",
             highlight_score=candidate["score"],
             review_status=candidate["review_status"],
             source_start_ms=start,

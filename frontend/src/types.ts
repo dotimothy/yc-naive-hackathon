@@ -18,6 +18,12 @@ export type Game = {
 
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed';
 
+export type IdentityMergeSuggestion = {
+  track_id: string; timestamp_ms: number; status: 'needs_review'; requires_review: true;
+  candidates: { player_id: string; player_label: string; track_ids: string[]; score: number; gap_ms: number }[];
+  excluded_candidates?: { player_id: string; reason: string }[];
+};
+
 export type JobReport = {
   device?: string;
   execution_mode?: string;
@@ -35,6 +41,11 @@ export type JobReport = {
   source_fps?: number;
   model?: string;
   tracker?: string;
+  /** Optional tracker review metadata (anonymous colour grouping, role flags, merge proposals). Heuristic, never facts. */
+  team_summary?: Record<string, unknown> | null;
+  role_flags?: unknown[] | Record<string, unknown> | null;
+  merge_proposals?: unknown[] | null;
+  identity_merge_suggestions?: IdentityMergeSuggestion[];
 };
 
 export type Artifact = { artifact_id: string; kind: string; uri: string; sha256: string };
@@ -52,7 +63,14 @@ export type Job = {
 
 export type Keypoint = { name: string; x: number; y: number; visibility: number };
 
+/** Anonymous colour grouping by first appearance — never a real team or a confirmed fact. */
+export type TeamLabel = 'Team A' | 'Team B' | 'unknown';
+/** Review flag only; a flagged person is never removed automatically. */
+export type RoleStatus = 'likely_non_player' | 'review_required' | 'unknown';
+
 export type TrackSample = {
+  team_label?: TeamLabel | null;
+  role_status?: RoleStatus | null;
   player_id?: string;
   player_label?: string;
   raw_track_id?: string;
@@ -112,7 +130,8 @@ export type Envelope =
   | EnvelopeOf<'tracks.batch', TracksBatch>
   | EnvelopeOf<'clip.updated', Clip>
   | EnvelopeOf<'event.created', GameEvent>
-  | EnvelopeOf<'audit.created', unknown>;
+  | EnvelopeOf<'audit.created', unknown>
+  | EnvelopeOf<'highlights.updated', HighlightBundle>;
 
 type EnvelopeOf<K extends string, P> = {
   sequence?: number;
@@ -137,7 +156,69 @@ export type Items<T> = { items: T[] };
 
 export type HighlightStatus = 'not_generated' | 'queued' | 'running' | 'succeeded' | 'failed';
 export type HighlightReviewStatus = 'pending' | 'approved' | 'rejected';
-export type HighlightEventType = 'visual_activity' | 'made_shot' | 'assist' | 'rebound' | 'steal' | 'block';
+export type HighlightEventType =
+  | 'visual_activity'
+  | 'made_shot'
+  | 'missed_shot'
+  | 'made_free_throw'
+  | 'missed_free_throw'
+  | 'assist'
+  | 'rebound'
+  | 'steal'
+  | 'block'
+  | 'turnover';
+
+/** Saved reviewer facts for a candidate (docs/REVIEWED_STATS_CONTRACT.md). Optional for old data. */
+export type CandidateReview = {
+  decision?: HighlightReviewStatus;
+  event_type?: HighlightEventType;
+  /** Actual source event time; start_ms <= t < end_ms. */
+  event_time_ms?: number | null;
+  /** Only for made_shot (field goal); null = value unknown. */
+  points?: 1 | 2 | 3 | null;
+  actor_confirmed?: boolean;
+  distinct_event_confirmed?: boolean;
+};
+
+export type ReviewRequest = {
+  decision: HighlightReviewStatus;
+  event_type: HighlightEventType;
+  event_time_ms?: number | null;
+  points?: 1 | 2 | 3 | null;
+  actor_confirmed?: boolean;
+  distinct_event_confirmed?: boolean;
+};
+
+export type StatEvidence = {
+  candidate_id: string;
+  event_type: string;
+  event_time_ms: number;
+  points: number | null;
+  track_id: string;
+  clip_uri: string | null;
+};
+
+/** Counts within reviewed evidence only — not full-game official totals. */
+export type BasketballStats = {
+  scope: 'reviewed_events';
+  has_evidence: boolean;
+  reviewed_events_count: number;
+  field_goals_made: number;
+  field_goals_attempted: number;
+  free_throws_made: number;
+  free_throws_attempted: number;
+  points: number | null;
+  unvalued_makes: number;
+  assists: number;
+  rebounds: number;
+  steals: number;
+  blocks: number;
+  turnovers: number;
+  pending_candidates: number;
+  held_events_count: number;
+  evidence: StatEvidence[];
+  held_events: { candidate_id: string; reason: string }[];
+};
 
 export type HighlightPlayer = {
   identity_source?: 'automatic' | 'reviewer' | 'track';
@@ -147,7 +228,11 @@ export type HighlightPlayer = {
   label: string;
   track_ids: string[];
   identity_confirmed: boolean;
+  /** Editorial clip priority only; never shown as a player rating. */
   highlight_score: number | null;
+  basketball_stats?: BasketballStats | null;
+  team_label?: TeamLabel | null;
+  role_status?: RoleStatus | null;
   verified_play_count: number;
   candidate_count: number;
   selected_count: number;
@@ -173,6 +258,7 @@ export type HighlightCandidate = {
   clip_id: string | null;
   clip_uri: string | null;
   qa_status: string | null;
+  review?: CandidateReview | null;
 };
 
 export type RosterGroup = { player_id: string; label: string; track_ids: string[]; confirmed: true };

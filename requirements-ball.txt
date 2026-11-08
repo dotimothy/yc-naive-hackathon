@@ -1,0 +1,4 @@
+# Optional RF-DETR inference environment; keep separate from the core app environment.
+rfdetr==1.3.0
+transformers==4.57.3
+peft==0.17.1

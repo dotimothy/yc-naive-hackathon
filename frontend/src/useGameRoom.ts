@@ -50,7 +50,7 @@ function upsertJob(state: RoomState, job: Job): RoomState {
   const index = state.jobs.findIndex((j) => j.job_id === job.job_id);
   const existing = index >= 0 ? state.jobs[index] : undefined;
   // Replayed history can deliver stale non-terminal updates after a fetched terminal state.
-  if (existing && isTerminal(existing) && !isTerminal(job)) return state;
+  if (existing && isTerminal(existing) && !isTerminal(job) && job.attempts <= existing.attempts) return state;
   if (existing && existing.attempts > job.attempts) return state;
   const jobs = index >= 0 ? state.jobs.map((j, i) => (i === index ? { ...j, ...job } : j)) : [...state.jobs, job];
   const latest = jobs[jobs.length - 1];
@@ -70,7 +70,7 @@ function reducer(state: RoomState, action: Action): RoomState {
       const latest = action.jobs[action.jobs.length - 1] ?? null;
       const latestId = latest?.job_id ?? null;
       const sameScope = latestId === state.activeJobId && (latest?.attempts ?? 0) === state.attempt;
-      const tracks = new Map(sameScope ? state.tracks : undefined);
+      const tracks = new Map<string, TrackSample>();
       for (const s of action.tracks) tracks.set(sampleKey(s), s);
       // Fetched clips/events are authoritative replacements: highlight review edits and regeneration
       // remove obsolete selections server-side, so stale entries must not linger from earlier state.
@@ -98,8 +98,10 @@ function reducer(state: RoomState, action: Action): RoomState {
     case 'envelope': {
       const env = action.envelope;
       if (env.kind === 'job.updated') return upsertJob(state, env.payload);
-      if (env.kind === 'audit.created') return state;
+      if (env.kind === 'audit.created' || env.kind === 'highlights.updated') return state;
       if (!env.job_id || env.job_id !== state.activeJobId) return { ...state, ignored: state.ignored + 1 };
+      // Completed-job snapshots include reviewer corrections; historical raw batches must not undo them.
+      if (state.loaded && isTerminal(state.jobs.find(j => j.job_id === state.activeJobId))) return { ...state, ignored: state.ignored + 1 };
       if (env.kind === 'tracks.batch') {
         const attempt = env.payload.attempt ?? state.attempt;
         if (attempt < state.attempt) return { ...state, ignored: state.ignored + 1 };
@@ -168,6 +170,7 @@ export function useGameRoom(gameId: string) {
   useEffect(() => {
     let openedAt = 0;
     let everOpened = false;
+    let correctionTimer: number | undefined;
     void refresh();
     const source = api.stream(gameId, {
       onOpen: () => {
@@ -179,6 +182,10 @@ export function useGameRoom(gameId: string) {
       onError: () => setStreamState(source.readyState === EventSource.CLOSED ? 'closed' : 'reconnecting'),
       onEnvelope: (envelope, receivedAt) => {
         dispatch({ type: 'envelope', envelope });
+        if (envelope.kind === 'highlights.updated' && openedAt && envelope.server_timestamp_ms >= openedAt - 50) {
+          window.clearTimeout(correctionTimer);
+          correctionTimer = window.setTimeout(() => void refresh(), 150);
+        }
         // Only envelopes written after this connection opened are live; earlier ones are replayed history.
         if (openedAt && envelope.server_timestamp_ms >= openedAt - 50) {
           const delay = Math.max(0, receivedAt - envelope.server_timestamp_ms);
@@ -187,6 +194,7 @@ export function useGameRoom(gameId: string) {
       },
     });
     return () => {
+      window.clearTimeout(correctionTimer);
       source.close();
       refreshAbort.current?.abort();
     };
