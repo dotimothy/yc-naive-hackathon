@@ -1,5 +1,5 @@
 import type {WorkflowStore} from './analysis-store.js';
-import {TIKTOK_PROFILE} from './tiktok-media.js';
+import {PORTRAIT_PROFILE} from './portrait-export.js';
 import {indoorSourceHash} from './publish-contract.js';
 export type PublishingPolicy={enabled:boolean;platform:'tiktok';visibility:'public';enabled_at:string;include_job_ids?:string[]};
 /** One publisher owns delivery; role agents never race independent social posts. */
@@ -10,9 +10,9 @@ export async function publicationTick(store:WorkflowStore,policy:PublishingPolic
  for(const r of store.all()) {
   if(r.state!=='succeeded'||!r.output?.clips?.length||r.output.source_sha256!==indoorSourceHash)continue;
   if(!policy.include_job_ids?.includes(r.job_id)&&!(Date.parse(r.completed_at)>start))continue;
-  if(r.publication?.profile===TIKTOK_PROFILE&&['posted','failed','blocked','cancelled','cancellation_pending'].includes(r.publication.status))continue;
+  if(r.publication?.profile===PORTRAIT_PROFILE&&['posted','failed','blocked','cancelled','cancellation_pending'].includes(r.publication.status))continue;
   if(r.publication?.cancel_requested){r.publication.status='cancelled';store.save(r);continue;}
-  r.publication={...r.publication,profile:TIKTOK_PROFILE,platform:'tiktok',requested_visibility:'public',status:'preparing',error:null,previous_attempts:r.publication?.attempts};store.save(r);
+  r.publication={...r.publication,profile:PORTRAIT_PROFILE,platform:'tiktok',requested_visibility:'public',status:'preparing',error:null,previous_attempts:r.publication?.attempts};store.save(r);
   try {
    await run(r.job_id);
    const current=store.get(r.job_id);

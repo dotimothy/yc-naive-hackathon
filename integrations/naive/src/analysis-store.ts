@@ -23,15 +23,25 @@ export class WorkflowStore {
   } catch(e){this.db.exec('ROLLBACK');throw e;}
  }
  reservePublication(jobId:string,profile:string,fee=13000) {
+  if(!Number.isSafeInteger(fee)||fee<=0)throw new Error('Invalid publishing reservation');
   this.db.exec('BEGIN IMMEDIATE');
   try {
    const r=this.get(jobId);if(!r||r.state!=='succeeded')throw new Error('Completed workflow required for publishing');
    r.publication_reservations ||= {};
-   if(r.publication_reservations[profile]){this.db.exec('COMMIT');return;}
+   if(Object.hasOwn(r.publication_reservations,profile)){this.db.exec('COMMIT');return;}
    if(r.reserved+fee>1_000_000)throw new Error('Publishing exceeds the approved per-video cap');
    const used=Number(this.db.prepare('SELECT COALESCE(SUM(reserved),0) AS used FROM workflows WHERE month=?').get(r.month)!.used);
    if(used+fee>9_000_000)throw new Error('Publishing exceeds the integration monthly allocation');
    r.reserved+=fee;r.publication_reservations[profile]=fee;this.save(r);this.db.exec('COMMIT');
+  }catch(e){this.db.exec('ROLLBACK');throw e;}
+ }
+ settleReservation(jobId:string,profile:string,actual:number) {
+  if(!Number.isSafeInteger(actual)||actual<0)throw new Error('Invalid settled usage');
+  this.db.exec('BEGIN IMMEDIATE');
+  try {
+   const r=this.get(jobId),held=r?.publication_reservations?.[profile];
+   if(typeof held!=='number'||actual>held)throw new Error('Usage exceeds its reserved ceiling');
+   r.reserved+=actual-held;r.publication_reservations[profile]=actual;this.save(r);this.db.exec('COMMIT');
   }catch(e){this.db.exec('ROLLBACK');throw e;}
  }
  initialized() {return Boolean(this.db.prepare("SELECT value FROM settings WHERE key='initialized'").get());}

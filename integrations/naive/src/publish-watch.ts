@@ -7,6 +7,7 @@ import {setTimeout} from 'node:timers/promises';
 import {WorkflowStore} from './analysis-store.js';
 import {publicationTick,type PublishingPolicy} from './publication-queue.js';
 import {safeError} from './client.js';
+import {PORTRAIT_PROFILE} from './portrait-export.js';
 const folder=fileURLToPath(new URL('../../../data/naive/',import.meta.url));
 const root=fileURLToPath(new URL('../',import.meta.url));
 await mkdir(folder,{recursive:true});
@@ -18,7 +19,7 @@ for(const signal of ['SIGINT','SIGTERM'] as const)process.on(signal,()=>{stop=tr
 const run=async(id:string)=>{
  try{const result=await promisify(execFile)(join(root,'node_modules/.bin/tsx'),[join(root,'src/publish-test.ts'),'--job',id],{cwd:root,timeout:600000,maxBuffer:1024*1024});process.stdout.write(result.stdout);}
  catch(e){const error=e as Error&{stdout?:string;stderr?:string};if(error.stdout)process.stdout.write(error.stdout);const row=store.get(id),clip=row?.output?.clips?.[0];
-   if(clip){try{const saved=JSON.parse(await readFile(folder+'publish-public-tiktok-30fps-v1-'+clip.clip_id+'.json','utf8'));if(saved.post_id&&!['failed','removed_visibility_mismatch'].includes(saved.status)){row.publication={...row.publication,status:row.publication?.cancel_requested?'cancellation_pending':'pending',post_id:saved.post_id};store.save(row);return;}}catch{}}
+   if(clip){try{const saved=JSON.parse(await readFile(folder+'publish-public-tiktok-'+PORTRAIT_PROFILE+'-'+clip.clip_id+'.json','utf8'));if(saved.post_id&&!['failed','removed_visibility_mismatch'].includes(saved.status)){row.publication={...row.publication,status:row.publication?.cancel_requested?'cancellation_pending':'pending',post_id:saved.post_id};store.save(row);return;}}catch{}}
    throw new Error('Automatic publication did not complete; see publishing journal');}
 };
 console.log(JSON.stringify({event:'autonomous_publisher_ready',platform:'tiktok',requested_visibility:'public'}));

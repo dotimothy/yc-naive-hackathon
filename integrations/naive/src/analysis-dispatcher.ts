@@ -6,6 +6,7 @@ import { naiveClient, safeError } from './client.js';
 import { buildEvidence, snapshotId } from './analysis-contract.js';
 import { WorkflowStore } from './analysis-store.js';
 import { createAnalysisEngine } from './analysis-engine.js';
+import {previewRequest} from './preview-http.js';
 const folder=fileURLToPath(new URL('../../../data/naive/',import.meta.url));
 const base=new URL(process.env.PLAYLATTICE_URL||'http://127.0.0.1:8000');
 if(!['127.0.0.1','localhost','[::1]'].includes(base.hostname)||base.protocol!=='http:') throw new Error('Analysis API must be loopback HTTP');
@@ -47,6 +48,7 @@ async function tick(explicitGame?:string) {
 const server=createServer(async(req,res)=>{
  res.setHeader('Content-Type','application/json');res.setHeader('Cache-Control','no-store');
  try {
+  if(await previewRequest(req,res,store,folder+'portrait-exports'))return;
   const url=new URL(req.url||'/','http://127.0.0.1');
   if(req.method==='GET'&&url.pathname==='/health'){res.end(JSON.stringify({status:'ok',busy,publishing:false}));return;}
   if(req.method==='GET'&&url.pathname==='/workflows'){res.end(JSON.stringify({items:store.all().filter(r=>r.state!=='baseline_skipped').map(({evidence,request,...r})=>r)}));return;}

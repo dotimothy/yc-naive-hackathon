@@ -5,7 +5,8 @@ import { setTimeout } from 'node:timers/promises';
 import { naiveClient,safeError } from './client.js';
 import { WorkflowStore } from './analysis-store.js';
 import { publicTikTokTestPost,selectTestWorkflow } from './publish-contract.js';
-import {prepareTikTokMedia,TIKTOK_PROFILE,frameRate} from './tiktok-media.js';
+import {frameRate} from './tiktok-media.js';
+import {portraitExport,PORTRAIT_PROFILE} from './portrait-export.js';
 const folder=fileURLToPath(new URL('../../../data/naive/',import.meta.url));
 const identity='idn_kyebzf0eg9myzy39dmf7vfrg07';
 const store=new WorkflowStore(folder+'analysis-workflows.sqlite3');
@@ -29,14 +30,17 @@ try {
  const response=await fetch(base+clip.uri,{redirect:'error',signal:AbortSignal.timeout(20000)});
  if(!response.ok||Number(response.headers.get('content-length'))>10*1024*1024)throw new Error('Source media unavailable or oversized');
  const sourceBytes=new Uint8Array(await response.arrayBuffer());if(sourceBytes.length>10*1024*1024)throw new Error('Source media exceeds test limit');
- const prepared=await prepareTikTokMedia(sourceBytes,clip.sha256,folder+'publish-media');
- console.log(JSON.stringify({event:'publishing_media_ready',profile:TIKTOK_PROFILE,input_fps:frameRate(prepared.recipe.input_metadata.streams.find((s:any)=>s.codec_type==='video')?.avg_frame_rate),output_fps:frameRate(prepared.metadata.streams.find(s=>s.codec_type==='video')?.avg_frame_rate),sha256:prepared.sha256}));
+ if(createHash('sha256').update(sourceBytes).digest('hex')!==clip.sha256)throw new Error('Source clip hash mismatch');
+ const prepared=await portraitExport(workflow.job_id,workflow.game_id,selected,base);
+ console.log(JSON.stringify({event:'publishing_media_ready',profile:PORTRAIT_PROFILE,players:prepared.recipe.track_count,quizzes:prepared.recipe.quiz_count,music_missing:prepared.recipe.quiz_music_missing,output_fps:frameRate(prepared.metadata.streams.find(s=>s.codec_type==='video')?.avg_frame_rate),sha256:prepared.sha256}));
  if(!process.argv.includes('--prepare-only')) {
- const key='playlattice-tiktok-public-30fps-v1-'+clip.clip_id;
- const file=folder+'publish-public-tiktok-30fps-v1-'+clip.clip_id+'.json';
+ if(!prepared.recipe.quiz_count||prepared.recipe.quiz_music_missing)throw new Error('Portrait preview is ready; a grounded quiz and the requested quiz music are required before publishing');
+ const key='playlattice-tiktok-'+PORTRAIT_PROFILE+'-'+clip.clip_id;
+ const file=folder+'publish-public-tiktok-'+PORTRAIT_PROFILE+'-'+clip.clip_id+'.json';
  let state:any;
  try{state=JSON.parse(await readFile(file,'utf8'));}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;}
- state ||= {key,created_ms:Date.now(),job_id:workflow.job_id,clip_id:clip.clip_id,identity,visibility:'public',platform:'tiktok',source_sha256:clip.source_sha256,media_sha256:prepared.sha256,source_clip_sha256:clip.sha256,media_profile:TIKTOK_PROFILE};
+ state ||= {key,created_ms:Date.now(),job_id:workflow.job_id,clip_id:clip.clip_id,identity,visibility:'public',platform:'tiktok',source_sha256:clip.source_sha256,media_sha256:prepared.sha256,source_clip_sha256:clip.sha256,media_profile:PORTRAIT_PROFILE};
+ if(state.media_sha256!==prepared.sha256)throw new Error('Prepared media changed; existing publication journal cannot be reused');
  const save=async()=>{await writeFile(file+'.tmp',JSON.stringify(state,null,2),{mode:0o600});await rename(file+'.tmp',file);};
  if(!state.file_id) {
   for(const filename of await readdir(folder)) {
@@ -69,7 +73,7 @@ try {
   }
   await save();console.log(JSON.stringify({event:'media_uploaded',file_id:state.file_id}));
  }
- state.body ||= publicTikTokTestPost(state.file_id,selected,workflow.output.source_sha256);
+ if(!state.body){state.body=publicTikTokTestPost(state.file_id,selected,workflow.output.source_sha256);state.body.content=`PlayLattice: ${prepared.recipe.track_count} player-focused replays and ${prepared.recipe.quiz_count} prediction quizzes. Captions describe observed movement; player labels are provisional.\n\nSource: TrackID3x3, Kazuhiro Yamada et al. https://github.com/open-starlab/TrackID3x3\nCC BY 4.0: https://creativecommons.org/licenses/by/4.0/\nCropped, captioned and sequenced by PlayLattice. Original quiz music: ${prepared.recipe.quiz_music_title}.`;}
  if('visibility' in state.body||state.body.platforms.length!==1||state.body.platforms[0]!=='tiktok')throw new Error('Stored publication policy is not the authorized public TikTok request');
  await save();
  if(!state.post_id) {
@@ -81,7 +85,7 @@ try {
    if(Date.now()-state.created_ms>23*60*60*1000)throw new Error('Post replay window expired; no new post submitted');
    const latest=await read(`/api/games/${encodeURIComponent(workflow.game_id)}/jobs`);
    if(latest.items.at(-1)?.job_id!==workflow.job_id||store.get(workflow.job_id)?.state!=='succeeded')throw new Error('Workflow changed before publication');
-   assertActive();store.reservePublication(workflow.job_id,TIKTOK_PROFILE);
+   assertActive();store.reservePublication(workflow.job_id,PORTRAIT_PROFILE);
    state.post_attempted=true;await save();
    const post=await client.social.createPost(identity,state.body);state.post_id=post.id;
   }
@@ -92,7 +96,7 @@ try {
   const live=await client.social.getPost(identity,state.post_id);
   if(live.status==='failed') {
    state.status='failed';state.provider_error=live.error||'Provider returned failed without an error reason';state.checked_at=new Date().toISOString();await save();
-   const record=store.get(workflow.job_id);record.publication={...record.publication,profile:TIKTOK_PROFILE,platform:'tiktok',requested_visibility:'public',post_id:state.post_id,status:'failed',error:state.provider_error};store.save(record);
+   const record=store.get(workflow.job_id);record.publication={...record.publication,profile:PORTRAIT_PROFILE,platform:'tiktok',requested_visibility:'public',post_id:state.post_id,status:'failed',error:state.provider_error};store.save(record);
    throw new Error(state.provider_error);
   }
   if(live.status!=='posted'){state.status=live.status;await save();await setTimeout(5000);continue;}
@@ -106,7 +110,7 @@ try {
   }
   await setTimeout(5000);
  }
- if(state.status==='posted'&&state.url){const record=store.get(workflow.job_id);record.publication={...record.publication,profile:TIKTOK_PROFILE,platform:'tiktok',requested_visibility:'public',public_access_verified:state.public_access_verified||false,post_id:state.post_id,url:state.url,status:state.status,error:null};store.save(record);}
+ if(state.status==='posted'&&state.url){const record=store.get(workflow.job_id);record.publication={...record.publication,profile:PORTRAIT_PROFILE,platform:'tiktok',requested_visibility:'public',public_access_verified:state.public_access_verified||false,post_id:state.post_id,url:state.url,status:state.status,error:null};store.save(record);}
  if(state.status!=='posted'||!state.url)throw new Error('Publishing still pending; rerun reconciles the original post');
  }
 }catch(e){console.error(JSON.stringify(safeError(e)));process.exitCode=1;}finally{store.close();}
