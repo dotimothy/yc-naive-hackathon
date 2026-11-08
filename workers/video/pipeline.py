@@ -24,7 +24,8 @@ from workers.video.identity import (
 )
 from workers.video.basketball_pass import BasketballPass
 from workers.video.cancellation import check_cancelled
-from workers.video.highlights import build_highlights, render_highlights
+from workers.video.highlights import build_highlights, render_highlights, split_ranges
+from workers.video.shots import ShotDetector, classify_shots
 from workers.render.media import probe, render_clip, verify_clip, sha256
 
 NAMES = [
@@ -114,6 +115,12 @@ def process_video(source_path, output_dir, options, emit):
     teams = TeamGrouper()
     track_descriptors = {}
     identities = PlayerIdentityTracker(game, reconnection="review")
+    shot_detector = ShotDetector()
+    shot_detection_seconds = 0.0
+    shot_start_ms = 0
+    trackers = [tracker]
+    identity_trackers = [("0", identities)]
+    team_groupers = {"0": teams}
     cap = cv2.VideoCapture(str(source_path))
     inference_time = 0.0
     transfer_time = 0.0
@@ -134,9 +141,7 @@ def process_video(source_path, output_dir, options, emit):
                 and ball_status == "running"
                 and index % ball_stride == 0
             )
-            if not (pose_due or ball_due):
-                index += 1
-                continue
+            # Inspect every decoded source frame without opening a second decoder.
             ok, frame = cap.retrieve()
             if not ok:
                 break
@@ -150,6 +155,35 @@ def process_video(source_path, output_dir, options, emit):
             if timestamp <= last_timestamp:
                 raise ValueError("Non-monotonic source timestamps")
             last_timestamp = timestamp
+            before_shot = time.perf_counter()
+            cut = shot_detector.update(frame, timestamp)
+            shot_detection_seconds += time.perf_counter() - before_shot
+            shot_id = str(shot_detector.shot_id)
+            if cut:
+                shot_start_ms = timestamp
+                tracker = ContinuityTracker()
+                trackers.append(tracker)
+                identities = PlayerIdentityTracker(
+                    game + "-shot" + shot_id, reconnection="review"
+                )
+                identity_trackers.append((shot_id, identities))
+                teams = TeamGrouper()
+                team_groupers[shot_id] = teams
+                if ball is not None and ball_status == "running":
+                    ball.begin_shot(shot_id, timestamp)
+            if cut or index == 0:
+                live_shots = shot_detector.finalize(metadata["duration_ms"])
+                for item in live_shots:
+                    item.update(
+                        shot_id=str(item["shot_id"]),
+                        category="uncertain",
+                        requires_review=True,
+                        review_status="pending",
+                    )
+                emit("shots.updated", dict(items=live_shots))
+            if not (pose_due or ball_due):
+                index += 1
+                continue
             if options.get("replay_paced"):
                 time.sleep(
                     max(0, timestamp / 1000 - (time.perf_counter() - replay_start))
@@ -189,7 +223,7 @@ def process_video(source_path, output_dir, options, emit):
             if first_inference_seconds is None:
                 first_inference_seconds = seconds
             keep = result["scores"] >= options.get("confidence", 0.25)
-            if options.get("court_polygon"):
+            if options.get("court_polygon") and shot_id == "0":
                 polygon = np.array(options["court_polygon"], dtype=np.float32)
                 in_court = [
                     cv2.pointPolygonTest(
@@ -207,7 +241,20 @@ def process_video(source_path, output_dir, options, emit):
             boxes = result["boxes"][keep].numpy()
             descriptors = [uniform_descriptor(frame, box) for box in boxes]
             ids = tracker.update(boxes, descriptors, timestamp_ms=timestamp)
-            associations = identities.update(ids, boxes, descriptors, timestamp)
+            identity_ids = (
+                ids if shot_id == "0" else ["s" + shot_id + ":" + str(i) for i in ids]
+            )
+            associations = identities.update(
+                identity_ids, boxes, descriptors, timestamp
+            )
+            if shot_id != "0":
+                for association in associations:
+                    association["player_label"] = (
+                        "Shot "
+                        + str(int(shot_id) + 1)
+                        + " · "
+                        + association["player_label"]
+                    )
             batch = []
             w, h = metadata["width"], metadata["height"]
             for j, (box, track_id) in enumerate(zip(boxes, ids)):
@@ -242,6 +289,8 @@ def process_video(source_path, output_dir, options, emit):
                 batch.append(
                     dict(
                         game_id=game,
+                        shot_id=shot_id,
+                        shot_start_ms=shot_start_ms,
                         **associations[j],
                         timestamp_ms=timestamp,
                         bbox=[x1 / w, y1 / h, (x2 - x1) / w, (y2 - y1) / h],
@@ -270,26 +319,49 @@ def process_video(source_path, output_dir, options, emit):
         )
     if index == 0:
         raise ValueError("No decodable video frames")
+    shots = shot_detector.finalize(metadata["duration_ms"])
+    for shot in shots:
+        shot["shot_id"] = str(shot["shot_id"])
+    shots = classify_shots(shots, samples)
+    for shot in shots:
+        shot["review_status"] = "pending"
+        shot["reasons"] = shot.get("category_reasons", [])
+    emit("shots.updated", dict(items=shots))
     aspect = metadata["width"] / metadata["height"]
-    first_roles = flag_non_players(
-        samples, aspect=aspect, court_polygon=options.get("court_polygon")
-    )
-    team_map, team_summary = teams.assign(
-        exclude=[k for k, v in first_roles.items() if v["role_status"] != "unknown"]
-    )
-    role_flags = flag_non_players(
-        samples,
-        aspect=aspect,
-        court_polygon=options.get("court_polygon"),
-        team_assignments=team_map,
-    )
-    prototypes = {}
-    for key, values in track_descriptors.items():
-        if len(values) >= 3:
-            vector = np.mean(values, axis=0)
-            prototypes[key] = vector / max(1e-8, np.linalg.norm(vector))
-    merges = propose_tracklet_merges(
-        samples, descriptors=prototypes, teams=team_map, aspect=aspect
+    team_map, role_flags, merges, team_summaries = {}, {}, [], {}
+    for shot in shots:
+        sid = shot["shot_id"]
+        scene_samples = [s for s in samples if s["shot_id"] == sid]
+        court = options.get("court_polygon") if sid == "0" else None
+        first_roles = flag_non_players(
+            scene_samples, aspect=aspect, court_polygon=court
+        )
+        scene_teams, summary = team_groupers[sid].assign(
+            exclude=[k for k, v in first_roles.items() if v["role_status"] != "unknown"]
+        )
+        team_summaries[sid] = summary
+        team_map.update(scene_teams)
+        role_flags.update(
+            flag_non_players(
+                scene_samples,
+                aspect=aspect,
+                court_polygon=court,
+                team_assignments=scene_teams,
+            )
+        )
+        prototypes = {}
+        for key in {s["track_id"] for s in scene_samples}:
+            values = track_descriptors.get(key, [])
+            if len(values) >= 3:
+                vector = np.mean(values, axis=0)
+                prototypes[key] = vector / max(1e-8, np.linalg.norm(vector))
+        merges.extend(
+            propose_tracklet_merges(
+                scene_samples, descriptors=prototypes, teams=scene_teams, aspect=aspect
+            )
+        )
+    team_summary = (
+        team_summaries.get("0", {}) if len(shots) == 1 else dict(by_shot=team_summaries)
     )
     enriched = {}
     for sample in samples:
@@ -302,11 +374,16 @@ def process_video(source_path, output_dir, options, emit):
         enriched[key] = fields
     emit("tracks.enriched", dict(assignments=enriched))
     if ball is not None and ball_status == "running":
-        ball_report = ball.finish(samples, index)
+        ball_report = ball.finish(samples, index, shots=shots)
         ball_status = "succeeded"
     emit("phase", {"phase": "score"})
     bundle = build_highlights(
-        samples, metadata["duration_ms"], metadata["fps"], stride, options["job_id"]
+        samples,
+        metadata["duration_ms"],
+        metadata["fps"],
+        stride,
+        options["job_id"],
+        shots=shots,
     )
     clips, events = render_highlights(source_path, output_dir, bundle, game, emit)
     emit("phase", {"phase": "render"})
@@ -326,6 +403,7 @@ def process_video(source_path, output_dir, options, emit):
             ),
         ]
     )
+    ranges = split_ranges(ranges, shots)
     for i, cut in enumerate(ranges):
         start, end = cut["start_ms"], cut["end_ms"]
         path = render_clip(source_path, start, end, output_dir / ("clip_%d.mp4" % i))
@@ -337,6 +415,7 @@ def process_video(source_path, output_dir, options, emit):
             event_id="%s-event-%d" % (options["job_id"], i),
             source_start_ms=start,
             source_end_ms=end,
+            shot_id=cut.get("shot_id"),
             path=str(path.resolve()),
             identity_verified=False,
             **qa,
@@ -346,6 +425,7 @@ def process_video(source_path, output_dir, options, emit):
             event_id=clip["event_id"],
             game_id=game,
             chunk_id=str(i),
+            shot_id=cut.get("shot_id"),
             start_ms=start,
             end_ms=end,
             event_type=cut["event_type"],
@@ -371,6 +451,10 @@ def process_video(source_path, output_dir, options, emit):
         basketball_status=ball_status,
         basketball=ball_report,
         metadata=metadata,
+        shots=shots,
+        shot_detection_seconds=shot_detection_seconds,
+        scene_detection_method="hard-cut-heuristic-v1",
+        court_polygon_scope="first_shot_only",
         requested_device=requested_device,
         device=device,
         execution_mode=device,
@@ -388,12 +472,23 @@ def process_video(source_path, output_dir, options, emit):
         keypoint_visibility_threshold=KEYPOINT_THRESHOLD,
         tracker="Continuity + review-only fragment reconnection",
         tracker_version="continuity-review-fragments-v1",
-        continuity_stats=tracker.stats,
+        continuity_stats={
+            key: sum(t.stats.get(key, 0) for t in trackers) for key in tracker.stats
+        },
         team_summary=team_summary,
         role_flags=role_flags,
         merge_proposals=merges,
-        identity_summary=identities.summary(),
-        identity_merge_suggestions=identities.reconnection_suggestions(),
+        identity_summary=dict(
+            method="camera-shot-scoped",
+            players=sum(i.summary()["players"] for _, i in identity_trackers),
+            identity_confirmed=False,
+        ),
+        identity_summary_by_shot=[
+            dict(shot_id=sid, **i.summary()) for sid, i in identity_trackers
+        ],
+        identity_merge_suggestions=[
+            s for _, i in identity_trackers for s in i.reconnection_suggestions()
+        ],
         stride=stride,
         court_polygon=options.get("court_polygon"),
         decoded_frames=index,

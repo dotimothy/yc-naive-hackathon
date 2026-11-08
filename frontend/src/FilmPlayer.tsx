@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type RefObject } from 'react';
 import type { BallObject } from './BasketballPanel';
-import type { Clip, Game, TrackSample } from './types';
+import type { CameraShot, Clip, Game, TrackSample } from './types';
 
 /** Overlay only shows a sampled frame if it is at most this far before the playhead. */
 export const SAMPLE_WINDOW_MS = 400;
@@ -120,20 +120,24 @@ type PlayerProps = {
   showBoxes: boolean;
   showPose: boolean;
   objects?: BallObject[];
+  shots?: CameraShot[];
   selectedTrack: string | null;
 };
 
-export function FilmPlayer({ game, videoRef, playheadMs, index, showBoxes, showPose, selectedTrack, objects = [] }: PlayerProps) {
+export function FilmPlayer({ game, videoRef, playheadMs, index, showBoxes, showPose, selectedTrack, objects = [], shots = [] }: PlayerProps) {
   const [videoError, setVideoError] = useState<string | null>(null);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const W = game.width || natural?.w || 16;
   const H = game.height || natural?.h || 9;
-  const sampleTime = nearestPriorSample(index.times, playheadMs);
+  const currentShot = shots.find(s => s.start_ms <= playheadMs && playheadMs < s.end_ms);
+  const inCurrentShot = (t: number | null) => t !== null && (!shots.length || !!currentShot && currentShot.start_ms <= t && t < currentShot.end_ms);
+  const priorSample = nearestPriorSample(index.times, playheadMs);
+  const sampleTime = inCurrentShot(priorSample) ? priorSample : null;
   const samples = sampleTime === null ? [] : index.byTime.get(sampleTime) ?? [];
   const visible = selectedTrack ? samples.filter((s) => s.track_id === selectedTrack) : samples;
   const objectIndex = useMemo(() => { const times = [...new Set(objects.map(o => o.timestamp_ms))].sort((a,b) => a-b); const byTime = new Map<number, BallObject[]>(); for (const o of objects) byTime.set(o.timestamp_ms, [...(byTime.get(o.timestamp_ms) ?? []), o]); return { times, byTime }; }, [objects]);
   const objectTime = nearestPriorSample(objectIndex.times, playheadMs);
-  const visibleObjects = objectTime !== null && playheadMs - objectTime <= 200 ? objectIndex.byTime.get(objectTime) ?? [] : [];
+  const visibleObjects = objectTime !== null && inCurrentShot(objectTime) && playheadMs - objectTime <= 200 ? objectIndex.byTime.get(objectTime) ?? [] : [];
   const mismatch = natural && game.width && Math.abs(natural.w / natural.h - game.width / game.height) > 0.01;
   const font = H * 0.024;
 

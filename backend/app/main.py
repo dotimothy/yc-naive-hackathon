@@ -25,6 +25,7 @@ from workers.video.coordinated import run_analysis as process_video
 from workers.video.runtime import available_devices, select_device, POSE_MODEL
 from backend.app.highlight_routes import router as highlight_router, public_highlights
 from backend.app.basketball_routes import router as basketball_router
+from backend.app.shot_routes import router as shot_router
 from workers.video.sports.basketball import OUTDOOR_SAMPLE_COURT
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -182,6 +183,9 @@ def output_emitter(game_id, id, attempt):
             from backend.app.basketball_routes import public
 
             update(game_id, id, "basketball.updated", public(current))
+        elif kind == "shots.updated":
+            put("shots", id, dict(job_id=id, **payload))
+            update(game_id, id, kind, payload)
         elif kind == "tracks.enriched":
             put("track_metadata", id, dict(job_id=id, **payload))
             update(game_id, id, kind, payload)
@@ -223,7 +227,7 @@ def finish_cancellation(id):
         job = get("job", id)
         with connect() as db:
             for row in db.execute(
-                "SELECT kind,id,value FROM records WHERE kind IN ('batch','clip','event','highlights','track_metadata','basketball_batch','report')"
+                "SELECT kind,id,value FROM records WHERE kind IN ('batch','clip','event','highlights','track_metadata','basketball_batch','report','shots')"
             ).fetchall():
                 value = json.loads(row["value"])
                 if value.get("job_id") == id or (
@@ -283,7 +287,7 @@ def run_job(id):
             # Each retry replaces this job's materialized output; the append-only audit retains history.
             with connect() as db:
                 for row in db.execute(
-                    "SELECT kind,id,value FROM records WHERE kind IN ('batch','clip','event','highlights','track_metadata','basketball_batch')"
+                    "SELECT kind,id,value FROM records WHERE kind IN ('batch','clip','event','highlights','track_metadata','basketball_batch','shots')"
                 ).fetchall():
                     if json.loads(row["value"]).get("job_id") == id:
                         db.execute(
@@ -796,6 +800,7 @@ def profiles():
 
 app.include_router(highlight_router)
 app.include_router(basketball_router)
+app.include_router(shot_router)
 
 
 if (ROOT / "frontend/dist").exists():

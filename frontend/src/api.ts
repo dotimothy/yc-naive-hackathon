@@ -10,6 +10,8 @@ import type {
   ReviewRequest,
   RosterGroup,
   TrackSample,
+  ShotReviewDecision,
+  ShotSegments,
 } from './types';
 
 export class ApiError extends Error {
@@ -110,6 +112,23 @@ export const api = {
 
   events: (gameId: string, signal?: AbortSignal) =>
     request<Items<GameEvent>>(`/api/games/${enc(gameId)}/events`, { signal }).then((r) => r.items),
+
+  shots: (gameId: string, signal?: AbortSignal) =>
+    request<ShotSegments>(`/api/games/${enc(gameId)}/shots`, { signal }),
+
+  createShotClip: (gameId: string, shotId: string, jobId: string, signal?: AbortSignal) =>
+    request<Clip>(`/api/games/${enc(gameId)}/shots/${enc(shotId)}/clip`, {
+      method: 'POST', signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ job_id: jobId }),
+    }),
+
+  reviewShot: (gameId: string, shotId: string, jobId: string, decision: ShotReviewDecision, signal?: AbortSignal) =>
+    request<ShotSegments>(`/api/games/${enc(gameId)}/shots/${enc(shotId)}/review`, {
+      method: 'PUT', signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision, job_id: jobId }),
+    }),
 
   highlights: (gameId: string, signal?: AbortSignal) =>
     request<HighlightBundle>(`/api/games/${enc(gameId)}/highlights`, { signal }),

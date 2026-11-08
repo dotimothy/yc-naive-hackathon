@@ -1,3 +1,4 @@
+import { ShotSegmentsPanel } from './ShotSegmentsPanel';
 import { StrictMode, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { api, ApiError, request } from './api';
@@ -5,7 +6,7 @@ import { buildFrameIndex, FilmPlayer, formatMs, Timeline, trackColor, usePlayhea
 import { EVENT_TYPE_LABEL, HighlightsPanel } from './HighlightsPanel';
 import { BasketballPanel, type BallObject } from './BasketballPanel';
 import { LiveBoard } from './LiveBoard';
-import type { Clip, Game, GameEvent, Job } from './types';
+import type { CameraShot, Clip, Game, GameEvent, Job } from './types';
 import { isTerminal, useGameRoom, type DelayStats } from './useGameRoom';
 import './styles.css';
 
@@ -177,6 +178,7 @@ function GameRoom({ game }: { game: Game }) {
   const playheadMs = usePlayhead(videoRef);
   const [correctionError, setCorrectionError] = useState('');
   const [correcting, setCorrecting] = useState(false);
+  const [shotSegments, setShotSegments] = useState<CameraShot[]>([]);
   const [ballObjects, setBallObjects] = useState<BallObject[]>([]);
   const [showObjects, setShowObjects] = useState(true);
   const [highlightsRevision, setHighlightsRevision] = useState(0);
@@ -272,7 +274,7 @@ function GameRoom({ game }: { game: Game }) {
 
       <div className="room-grid">
         <section className="panel film">
-          <FilmPlayer game={game} videoRef={videoRef} playheadMs={playheadMs} index={index} showBoxes={showBoxes} showPose={showPose} selectedTrack={selectedTrack} objects={showObjects ? ballObjects : []} />
+          <FilmPlayer game={game} videoRef={videoRef} playheadMs={playheadMs} index={index} showBoxes={showBoxes} showPose={showPose} selectedTrack={selectedTrack} objects={showObjects ? ballObjects : []} shots={shotSegments} />
           <div className="controls">
             {active && <button className="secondary small danger" onClick={() => void room.cancelAnalysis()} disabled={room.cancelling || job?.status === 'cancelling'}>{room.cancelling || job?.status === 'cancelling' ? 'Cancelling…' : 'Cancel Analysis'}</button>}
             <label className="toggle"><input type="checkbox" checked={showObjects} onChange={e => setShowObjects(e.target.checked)} /> Ball / hoop</label>
@@ -324,6 +326,8 @@ function GameRoom({ game }: { game: Game }) {
           )}
         </div>
       </div>
+
+      <ShotSegmentsPanel onShots={setShotSegments} gameId={game.game_id} jobId={job?.job_id ?? null} jobStatus={job?.status} analysisActive={active} refreshKey={highlightsRevision} onSeek={(ms) => { setSelectedTrack(null); seekAndShow(ms); }} onUpdated={() => { refreshRoom(); setHighlightsRevision(v => v + 1); }} />
 
       <BasketballPanel analysisStatus={job?.status} refreshKey={highlightsRevision} gameId={game.game_id} jobId={job?.job_id ?? null} analysisActive={active} tracks={index.trackIds} onSeek={seekAndShow} onObjects={setBallObjects} onImported={() => { setHighlightsRevision(v => v + 1); refreshRoom(); }} />
 

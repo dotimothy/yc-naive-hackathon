@@ -15,8 +15,9 @@ from backend.tests.test_highlights import seed_game
 
 
 @pytest.mark.parametrize("ball_failure", [False, True])
+@pytest.mark.parametrize("camera_cut", [False, True])
 def test_single_decoder_model_cadences_and_source_timestamps(
-    tmp_path, monkeypatch, ball_failure
+    tmp_path, monkeypatch, ball_failure, camera_cut
 ):
     retrieved, pose_frames, ball_frames = [], [], []
     captures = []
@@ -33,7 +34,14 @@ def test_single_decoder_model_cadences_and_source_timestamps(
 
         def retrieve(self):
             retrieved.append(self.index)
-            return True, np.full((32, 32, 3), self.index, dtype=np.uint8)
+            frame = np.full((32, 32, 3), self.index, dtype=np.uint8)
+            if camera_cut:
+                frame[:] = [
+                    self.index,
+                    100 if self.index >= 6 else 0,
+                    0 if self.index >= 6 else 100,
+                ]
+            return True, frame
 
         def get(self, key):
             return self.index * 100
@@ -45,6 +53,9 @@ def test_single_decoder_model_cadences_and_source_timestamps(
         def __init__(self, *args):
             self.frames = 0
             self.emit = args[-1]
+
+        def begin_shot(self, shot_id, timestamp):
+            pass
 
         def snapshot(self):
             return dict(processed_frames=self.frames)
@@ -58,7 +69,7 @@ def test_single_decoder_model_cadences_and_source_timestamps(
         def flush(self):
             pass
 
-        def finish(self, players, decoded):
+        def finish(self, players, decoded, shots=None):
             assert decoded == 12 and len(players) == 3
             report = dict(processed_frames=self.frames, integrated=True)
             self.emit("basketball.updated", dict(status="succeeded", report=report))
@@ -108,7 +119,7 @@ def test_single_decoder_model_cadences_and_source_timestamps(
     )
     assert len(captures) == 1 and captures[0].released
     expected = [0, 2, 5, 10] if ball_failure else [0, 2, 4, 5, 6, 8, 10]
-    assert retrieved == expected
+    assert retrieved == list(range(12))
     assert pose_frames == [0, 5, 10]
     assert ball_frames == [
         (i, i * 100) for i in ([0, 2] if ball_failure else [0, 2, 4, 6, 8, 10])
@@ -116,12 +127,22 @@ def test_single_decoder_model_cadences_and_source_timestamps(
     assert result["analysis_mode"] == "shared_decoder" and result[
         "basketball_status"
     ] == ("failed" if ball_failure else "succeeded")
-    assert (
-        result["retrieved_frames"] == len(expected) and result["decoded_frames"] == 12
-    )
+    assert result["retrieved_frames"] == 12 and result["decoded_frames"] == 12
     assert [
         v["source_timestamp_ms"] for k, v in events if k == "analysis.progress"
-    ] == [i * 100 for i in retrieved]
+    ] == [i * 100 for i in expected]
+
+    if camera_cut:
+        assert [(s["start_ms"], s["end_ms"]) for s in result["shots"]] == [
+            (0, 600),
+            (600, 1200),
+        ]
+        tracked = json.loads((tmp_path / "tracks.json").read_text())
+        assert tracked[-1]["track_id"].startswith("s1:")
+        assert tracked[-1]["player_id"] not in {s["player_id"] for s in tracked[:-1]}
+        assert len(result["identity_summary_by_shot"]) == 2
+    else:
+        assert len(result["shots"]) == 1
 
 
 def test_optional_runtime_missing_is_explicit_and_keeps_core(tmp_path, monkeypatch):

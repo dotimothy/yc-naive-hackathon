@@ -37,6 +37,12 @@ class BasketballPass:
         self.frames_with_ball = 0
         self.seconds = 0.0
         self.last_time = -1
+        self.shot_id = "0"
+
+    def begin_shot(self, shot_id, timestamp_ms):
+        self.flush()
+        self.shot_id = str(shot_id)
+        self.linker = BallTrajectories()
 
     def snapshot(self):
         return dict(
@@ -69,6 +75,11 @@ class BasketballPass:
         observed = [d for d in detections if d["class_name"] in ("basketball", "hoop")]
         balls = [d for d in observed if d["class_name"] == "basketball"]
         linked = self.linker.update(balls, timestamp_ms)
+        for item in observed:
+            item["shot_id"] = self.shot_id
+        for item in linked:
+            item["shot_id"] = self.shot_id
+            item["ball_track_id"] = "s" + self.shot_id + "-" + item["ball_track_id"]
         # Preserve segment IDs for streamed ball observations as well as the final artifact.
         self.objects.extend([d for d in observed if d["class_name"] == "hoop"] + linked)
         self.pending.extend([d for d in observed if d["class_name"] == "hoop"] + linked)
@@ -98,16 +109,39 @@ class BasketballPass:
         self.pending = []
         self.last_flushed_frames = self.frames
 
-    def finish(self, players, decoded_frames):
+    def finish(self, players, decoded_frames, shots=None):
         self.flush()
-        hoops = stationary_hoops([d for d in self.objects if d["class_name"] == "hoop"])
+        shots = shots or [
+            dict(shot_id="0", start_ms=0, end_ms=self.metadata["duration_ms"])
+        ]
+        hoops, proposals = [], []
+        for shot in shots:
+            sid = str(shot["shot_id"])
+            observed = [d for d in self.objects if d.get("shot_id", "0") == sid]
+            scene_hoops = stationary_hoops(
+                [d for d in observed if d["class_name"] == "hoop"]
+            )
+            for hoop in scene_hoops:
+                hoop.update(shot_id=sid, hoop_id="s" + sid + "-" + hoop["hoop_id"])
+            scene_balls = [d for d in self.balls if d.get("shot_id", "0") == sid]
+            scene_players = [p for p in players if str(p.get("shot_id", "0")) == sid]
+            candidates = propose_shots(
+                scene_balls, scene_hoops, self.metadata["duration_ms"], scene_players
+            )
+            for candidate in candidates:
+                candidate.update(
+                    shot_id=sid,
+                    start_ms=max(candidate["start_ms"], shot["start_ms"]),
+                    end_ms=min(candidate["end_ms"], shot["end_ms"]),
+                )
+            hoops.extend(scene_hoops)
+            proposals.extend(candidates)
         report = self.snapshot()
         report.update(
             coverage_scope="full_video",
+            shots=shots,
             stable_hoops=hoops,
-            shot_candidates=propose_shots(
-                self.balls, hoops, self.metadata["duration_ms"], players
-            ),
+            shot_candidates=proposals,
             ball_segments=len({b["ball_track_id"] for b in self.balls}),
             decoded_frames=decoded_frames,
             inference_fps=self.frames / self.seconds if self.seconds else 0,

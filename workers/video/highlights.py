@@ -213,9 +213,69 @@ def summarize(bundle, groups=None, reviews=None):
     return attach_basketball_stats(bundle)
 
 
+def shot_is_eligible(shot):
+    """Heuristic gameplay is selectable; reviewer decisions override the raw label."""
+    review = shot.get("review_status", "pending")
+    if review == "confirmed_non_gameplay":
+        return False
+    if review == "confirmed_gameplay":
+        return True
+    return shot.get("category") == "gameplay_candidate"
+
+
+def _normalized_shots(shots, duration_ms=None):
+    if shots is None:
+        return None
+    normalized = []
+    ids = set()
+    for shot in shots:
+        start, end = shot["start_ms"], shot["end_ms"]
+        if any(isinstance(t, bool) or not isinstance(t, int) for t in (start, end)):
+            raise ValueError(
+                "Camera-shot boundaries must be integer source milliseconds"
+            )
+        start = max(0, start)
+        end = min(duration_ms, end) if duration_ms is not None else end
+        if end <= start:
+            raise ValueError("Camera shots must have positive source duration")
+        id = str(shot["shot_id"])
+        if id in ids:
+            raise ValueError("Camera-shot IDs must be unique")
+        ids.add(id)
+        normalized.append(dict(shot, shot_id=id, start_ms=start, end_ms=end))
+    normalized.sort(key=lambda shot: shot["start_ms"])
+    if any(a["end_ms"] > b["start_ms"] for a, b in zip(normalized, normalized[1:])):
+        raise ValueError("Camera-shot source ranges must not overlap")
+    return normalized
+
+
+def split_ranges(ranges, shots, eligible_only=True):
+    """Split source-time ranges at every camera boundary, preserving range metadata.
+
+    ``shots=None`` is legacy footage with no segmentation. An explicit empty
+    manifest or a range in an uncovered gap yields no camera-safe ranges.
+    """
+    shots = _normalized_shots(shots)
+    if shots is None:
+        return [dict(item) for item in ranges]
+    result = []
+    for item in ranges:
+        for shot in shots:
+            if eligible_only and not shot_is_eligible(shot):
+                continue
+            start = max(item["start_ms"], shot["start_ms"])
+            end = min(item["end_ms"], shot["end_ms"])
+            if start < end:
+                result.append(
+                    dict(item, start_ms=start, end_ms=end, shot_id=shot["shot_id"])
+                )
+    return result
+
+
 def build_highlights(
-    samples, duration_ms, fps, stride, job_id, max_clips=8, top_per_player=2
+    samples, duration_ms, fps, stride, job_id, max_clips=8, top_per_player=2, shots=None
 ):
+    shots = _normalized_shots(shots, duration_ms)
     interval = 1000 * stride / fps
     tracks = defaultdict(dict)
     for sample in samples:
@@ -231,15 +291,30 @@ def build_highlights(
         }
         segments = []
         for sample in ordered:
+            timestamp = sample["timestamp_ms"]
+            shot = (
+                next(
+                    (v for v in shots if v["start_ms"] <= timestamp < v["end_ms"]), None
+                )
+                if shots is not None
+                else None
+            )
+            if shots is not None and (shot is None or not shot_is_eligible(shot)):
+                continue
             if (
                 not segments
-                or sample["timestamp_ms"] - segments[-1][-1]["timestamp_ms"]
+                or sample["timestamp_ms"] - segments[-1]["samples"][-1]["timestamp_ms"]
                 > interval * 2.5
+                or (
+                    shot is not None
+                    and segments[-1]["shot"]["shot_id"] != shot["shot_id"]
+                )
             ):
-                segments.append([])
-            segments[-1].append(sample)
+                segments.append(dict(shot=shot, samples=[]))
+            segments[-1]["samples"].append(sample)
         count = 0
-        for segment in segments:
+        for item in segments:
+            segment, shot = item["samples"], item["shot"]
             if (
                 len(segment) < 4
                 or segment[-1]["timestamp_ms"] - segment[0]["timestamp_ms"] < 1000
@@ -270,13 +345,15 @@ def build_highlights(
                 a, b = window[0]["timestamp_ms"], window[-1]["timestamp_ms"]
                 id = job_id + "-highlight-" + track_id + "-" + str(count)
                 count += 1
+                clip_start = max(shot["start_ms"] if shot else 0, a - 1500)
+                clip_end = min(shot["end_ms"] if shot else duration_ms, b + 2000)
                 candidates.append(
                     dict(
                         candidate_id=id,
                         track_id=track_id,
                         player_id="track-" + track_id,
-                        start_ms=max(0, a - 1500),
-                        end_ms=min(duration_ms, b + 2000),
+                        start_ms=clip_start,
+                        end_ms=clip_end,
                         action_start_ms=a,
                         action_end_ms=b,
                         score=score,
@@ -287,7 +364,7 @@ def build_highlights(
                             dict(
                                 timestamp_ms=sample["timestamp_ms"],
                                 end_ms=min(
-                                    b + 2000,
+                                    clip_end,
                                     round(sample["timestamp_ms"] + min(interval, 250)),
                                 ),
                                 bbox=sample["bbox"],
@@ -304,6 +381,8 @@ def build_highlights(
                         qa_status=None,
                     )
                 )
+                if shot is not None:
+                    candidates[-1]["shot_id"] = shot["shot_id"]
     bundle = dict(
         job_id=job_id,
         generation_id=job_id,
@@ -320,6 +399,8 @@ def build_highlights(
         max_clips=max_clips,
         top_per_player=top_per_player,
     )
+    if shots is not None:
+        bundle["shots"] = shots
     attach_player_identities(bundle, samples)
     return summarize(bundle)
 
@@ -387,7 +468,7 @@ def add_spotlights(bundle, samples):
             for s in sorted(
                 by_track[candidate["track_id"]], key=lambda s: s["timestamp_ms"]
             )
-            if a <= s["timestamp_ms"] < a + 1500
+            if a <= s["timestamp_ms"] < min(a + 1500, candidate["end_ms"])
         ]
     return bundle
 
@@ -398,6 +479,17 @@ def render_highlights(source, output_dir, bundle, game_id, emit):
     clips, events = [], []
     for i, candidate in enumerate(c for c in bundle["candidates"] if c["selected"]):
         start, end = candidate["start_ms"], candidate["end_ms"]
+        if bundle.get("shots") is not None:
+            safe = split_ranges([candidate], bundle["shots"])
+            if (
+                len(safe) != 1
+                or safe[0]["start_ms"] != start
+                or safe[0]["end_ms"] != end
+            ):
+                raise ValueError(
+                    "Highlight candidate must fit one eligible camera shot"
+                )
+            candidate["shot_id"] = safe[0]["shot_id"]
         path = render_clip(
             source,
             start,
@@ -441,6 +533,8 @@ def render_highlights(source, output_dir, bundle, game_id, emit):
             ),
             **qa,
         )
+        if candidate.get("shot_id") is not None:
+            clip["shot_id"] = candidate["shot_id"]
         emit("clip.updated", clip)
         candidate.update(
             clip_id=clip["clip_id"], clip_uri=clip.get("uri"), qa_status=qa["qa_status"]
@@ -460,6 +554,8 @@ def render_highlights(source, output_dir, bundle, game_id, emit):
             verified=candidate["review_status"] == "approved",
             origin=candidate["origin"],
         )
+        if candidate.get("shot_id") is not None:
+            event["shot_id"] = candidate["shot_id"]
         emit("event.created", event)
         events.append(event)
         clips.append(clip)

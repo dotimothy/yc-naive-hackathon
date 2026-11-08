@@ -59,8 +59,15 @@ def bundle_for(game, job):
             raise
     samples = s.corrected_samples(job["job_id"])
     stride = job.get("options", {}).get("stride", 5)
+    from backend.app.shot_routes import effective_shots
+
     return build_highlights(
-        samples, game["duration_ms"], game["fps"], stride, job["job_id"]
+        samples,
+        game["duration_ms"],
+        game["fps"],
+        stride,
+        job["job_id"],
+        shots=effective_shots(job["job_id"]),
     )
 
 
@@ -395,6 +402,7 @@ def change_splits(game_id, body=None):
             id,
             max_clips=bundle["max_clips"],
             top_per_player=bundle["top_per_player"],
+            shots=bundle.get("shots"),
         )
         fresh["identity_revision"] = revision
         s.put("highlights", id, fresh)

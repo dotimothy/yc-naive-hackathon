@@ -24,6 +24,18 @@ export type IdentityMergeSuggestion = {
   excluded_candidates?: { player_id: string; reason: string }[];
 };
 
+export type ShotReviewDecision = 'gameplay' | 'non_gameplay' | 'pending';
+export type CameraShot = {
+  shot_id: string;
+  start_ms: number;
+  end_ms: number;
+  category: 'gameplay_candidate' | 'non_gameplay_candidate' | 'uncertain';
+  review_status: 'pending' | 'confirmed_gameplay' | 'confirmed_non_gameplay';
+  reasons?: string[];
+  requires_review: boolean;
+};
+export type ShotSegments = { job_id: string | null; items: CameraShot[]; status?: string };
+
 export type JobReport = {
   device?: string;
   execution_mode?: string;
@@ -46,6 +58,7 @@ export type JobReport = {
   role_flags?: unknown[] | Record<string, unknown> | null;
   merge_proposals?: unknown[] | null;
   identity_merge_suggestions?: IdentityMergeSuggestion[];
+  shots?: CameraShot[];
 };
 
 export type Artifact = { artifact_id: string; kind: string; uri: string; sha256: string };
@@ -69,6 +82,8 @@ export type TeamLabel = 'Team A' | 'Team B' | 'unknown';
 export type RoleStatus = 'likely_non_player' | 'review_required' | 'unknown';
 
 export type TrackSample = {
+  shot_id?: string;
+  shot_start_ms?: number;
   team_label?: TeamLabel | null;
   role_status?: RoleStatus | null;
   player_id?: string;

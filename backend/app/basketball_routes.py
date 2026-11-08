@@ -151,6 +151,39 @@ def import_candidate(game_id: str, candidate_id: str, body: ImportCandidate):
             raise HTTPException(
                 404, "Shot candidate not found in current ball analysis"
             )
+        from backend.app.shot_routes import effective_shots
+        from workers.video.highlights import shot_is_eligible
+
+        manifest = effective_shots(parent)
+        proposal_shot = None
+        if manifest is not None:
+            proposal_shot = next(
+                (
+                    shot
+                    for shot in manifest
+                    if shot["start_ms"] <= proposal["approach_ms"] < shot["end_ms"]
+                ),
+                None,
+            )
+            if not proposal_shot or not shot_is_eligible(proposal_shot):
+                raise HTTPException(
+                    409, "Confirm gameplay for this camera segment before adding a play"
+                )
+            if (
+                not proposal_shot["start_ms"]
+                <= proposal["start_ms"]
+                < proposal["end_ms"]
+                <= proposal_shot["end_ms"]
+            ):
+                raise HTTPException(422, "Shot candidate crosses a camera boundary")
+            if not any(
+                sample["track_id"] == body.track_id
+                and str(sample.get("shot_id", "0")) == proposal_shot["shot_id"]
+                for sample in s.corrected_samples(parent)
+            ):
+                raise HTTPException(
+                    422, "Select an actor track from this camera segment"
+                )
         bundle = deepcopy(bundle_for(s.get("game", game_id), analysis))
         assert_editable(bundle)
         if body.track_id not in bundle["track_stats"]:
@@ -166,6 +199,7 @@ def import_candidate(game_id: str, candidate_id: str, body: ImportCandidate):
                 dict(
                     candidate_id=id,
                     track_id=body.track_id,
+                    shot_id=proposal_shot["shot_id"] if proposal_shot else None,
                     player_id="track-" + body.track_id,
                     start_ms=proposal["start_ms"],
                     end_ms=proposal["end_ms"],
