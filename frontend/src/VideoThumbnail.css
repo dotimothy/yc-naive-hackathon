@@ -8,3 +8,5 @@
 .naive-video-cell > .video-thumbnail { width: 96px; }
 .naive-video-cell > div { min-width: 0; }
 @media (max-width: 600px) { .naive-video-cell > .video-thumbnail { width: 76px; } }
+
+.naive-now .naive-now-thumbnail { width: min(200px, 100%); margin-bottom: 12px; }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import './NaiveDashboard.css';
+import { VideoThumbnail } from './VideoThumbnail';
 
 /* Read-only view of the Naive crew pipeline served by the local integration on 127.0.0.1:8011
    (proxied as /naive-api). It never posts, starts or cancels anything; it only renders what the
@@ -15,17 +16,23 @@ const STALE_SNAPSHOT_MS = 30_000;
 type BatchItem = {
   id: string; name?: string; source_url?: string; status?: string; stage?: string;
   game_id?: string; job_id?: string; error?: string; preview_url?: string; post_url?: string;
+  completed_at?: string | number; camera_evidence?: string;
 };
-type Batch = { id?: string; status?: string; stop_at?: string | number; total?: number; counts?: Record<string, number>; items: BatchItem[] };
+type Batch = {
+  id?: string; status?: string; stop_at?: string | number; updated_at?: string | number;
+  total?: number; counts?: Record<string, number>; items: BatchItem[];
+};
 type Presentation = { preview_uri?: string; track_count?: number; quiz_count?: number; quiz_music_missing?: boolean | number };
 type Publication = { status?: string; url?: string; post_id?: string; error?: string; requested_visibility?: string; profile?: string };
+type Member = { session_id?: string; agent_id?: string; status?: string; stop_reason?: string; cost_micro_usd?: number };
 type Workflow = {
   job_id: string; game_id?: string; state?: string; created_ms?: number; completed_at?: string | number;
   reserved?: number; cost_micro_usd?: number; output?: unknown; presentation?: Presentation; publication?: Publication;
+  members?: Member[];
 };
 type Budget = { monthly_cap_micro_usd?: number; per_video_cap_micro_usd?: number; accounted_micro_usd?: number };
 type CrewMember = { name?: string; role?: string; id?: string };
-type Policy = { enabled?: boolean; platform?: string; visibility?: string };
+type Policy = { enabled?: boolean; platform?: string; visibility?: string; stop_at?: string | number };
 type Pipeline = {
   updated_at?: string | number; batch: Batch | null; workflows: Workflow[]; budget: Budget | null;
   services: Record<string, string>; crew: CrewMember[]; policy: Policy | null;
@@ -47,7 +54,7 @@ function normalize(raw: unknown): Pipeline | null {
   return {
     updated_at: typeof r.updated_at === 'string' || typeof r.updated_at === 'number' ? r.updated_at : undefined,
     batch: b ? { ...(b as Batch), counts: obj(b.counts) as Record<string, number> | undefined, items: arr<BatchItem>(b.items, (x) => typeof x.id === 'string') } : null,
-    workflows: arr<Workflow>(r.workflows, (x) => typeof x.job_id === 'string'),
+    workflows: arr<Workflow>(r.workflows, (x) => typeof x.job_id === 'string').map((w) => ({ ...w, members: arr<Member>(w.members, () => true) })),
     budget: (obj(r.budget) as Budget | null) ?? null,
     services,
     crew: arr<CrewMember>(r.crew, () => true),
@@ -131,6 +138,7 @@ const ago = (ms: number | null, now: number) => {
 const clock = (ms: number | null) => (ms === null ? '–' : new Date(ms).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }));
 const short = (id: string | undefined, n = 8) => (id ? id.slice(0, n) : '–');
 const words = (s: string | undefined) => (s ? s.replace(/[_-]+/g, ' ') : '–');
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** Status → existing `.status` colour classes from styles.css plus a few local ones. */
 function statusClass(s: string | undefined): string {
@@ -147,68 +155,116 @@ function statusClass(s: string | undefined): string {
 const Status = ({ value }: { value: string | undefined }) => <span className={`status ${statusClass(value)}`}>{value ? words(value) : '–'}</span>;
 
 /** Only render links for http(s) URLs or same-origin absolute paths; anything else stays text. */
-function SafeLink({ href, children }: { href: string | undefined; children: ReactNode }) {
+const safeHref = (href: string | undefined) => !!href && (/^https?:\/\//i.test(href) || (href.startsWith('/') && !href.startsWith('//')));
+function SafeLink({ href, children, className }: { href: string | undefined; children: ReactNode; className?: string }) {
   if (!href) return <span className="muted">–</span>;
-  const ok = /^https?:\/\//i.test(href) || (href.startsWith('/') && !href.startsWith('//'));
-  return ok ? <a href={href} target="_blank" rel="noreferrer noopener">{children}</a> : <code title="Not a browser URL">{href}</code>;
+  return safeHref(href) ? <a className={className} href={href} target="_blank" rel="noreferrer noopener">{children}</a> : <code title="Not a browser URL">{href}</code>;
 }
 
-// ---------- pipeline stages ----------
-const STAGES = [
-  { key: 'discovery', label: 'Discovery', hint: 'Source videos found' },
-  { key: 'raw', label: 'Raw clips', hint: 'Imported into the film room' },
-  { key: 'analysis', label: 'Analysis', hint: 'Crew workflows' },
-  { key: 'quiz', label: 'Portrait quizzes', hint: 'Rendered presentations' },
-  { key: 'post', label: 'TikTok posts', hint: 'Publication records' },
-] as const;
+// ---------- the five-step flow ----------
+/* What each step actually is in this integration (integrations/naive/src/overnight.ts):
+   discovery → raw_clipping → analysis → crew → final_clipping → posting → posted.
+   Local work (queue, PlayLattice API, CV workers, renderer, publisher) is kept apart from the
+   Naive crew agents. Agent chips are shown only when the endpoint's crew list names that agent. */
+type FlowStep = {
+  key: string; icon: string; label: string; raw: string[];
+  input: string; output: string; local: string; agents: string[]; agentsDo?: string; note?: string;
+};
+const FLOW: FlowStep[] = [
+  { key: 'discover', icon: '⌕', label: 'Discover Videos', raw: ['discovery'],
+    input: 'Cached list of trimmed, authorized Drive clips', output: 'Integrity-checked source MP4',
+    local: 'Overnight queue checks size & SHA-256', agents: [],
+    note: 'No live search or VLM discovery runs in this batch — it starts from the cached clip list.' },
+  { key: 'select', icon: '✂', label: 'Select Raw Clips', raw: ['raw_clipping'],
+    input: 'Checked source MP4', output: 'Film-room game record',
+    local: 'PlayLattice API imports the clip (skipped if already imported)', agents: [] },
+  { key: 'analyze', icon: '◎', label: 'Analyze Play', raw: ['analysis', 'crew'],
+    input: 'Game record', output: 'Player tracks + crew clip package',
+    local: 'CV workers: player detection, pose & tracking', agents: ['scout', 'clipper', 'caption-editor', 'channel-manager', 'analyst'],
+    agentsDo: 'Crew picks source-bound clips & captions (CEO coordinates)' },
+  { key: 'quiz', icon: '▯', label: 'Create Portrait Quizzes', raw: ['final_clipping'],
+    input: 'Crew clip package', output: 'Portrait quiz preview',
+    local: 'Portrait renderer builds the vertical replay', agents: ['clipper'], agentsDo: 'Clipper chooses quiz moments & music' },
+  { key: 'post', icon: '↑', label: 'Post To TikTok', raw: ['posting', 'posted'],
+    input: 'Preview + caption package', output: 'TikTok post link',
+    local: 'Local publisher posts via the Naive social provider', agents: ['channel-manager'], agentsDo: 'Channel-manager owns the hand-off' },
+];
+const SUBSTEP: Record<string, string> = { analysis: 'local CV', crew: 'Naive crew', posted: 'posted', posting: 'posting' };
 
-/** Best-effort position of a reported stage string on the five-step strip; null if unrecognised. */
+/** Position of a reported stage string on the five-step flow; null if unrecognised. */
 function stageIndex(stage: string | undefined): number | null {
   const s = (stage ?? '').toLowerCase();
   if (!s) return null;
+  const exact = FLOW.findIndex((f) => f.raw.includes(s));
+  if (exact >= 0) return exact;
   if (/(post|publish|tiktok|upload)/.test(s)) return 4;
   if (/(quiz|portrait|present|render|final_clip|final clip)/.test(s)) return 3;
   if (/(analy|track|workflow|crew|curat)/.test(s)) return 2;
   if (/(raw|clip|download|import|ingest|fetch)/.test(s)) return 1;
-  if (/(discover|search|found|queue|candidate)/.test(s)) return 0;
+  if (/(discover|search|found|candidate)/.test(s)) return 0;
   return null;
 }
 
-/** "52 succeeded · 18 empty · 2 cancelled" — every reported state, most common first. */
-const byState = (vals: (string | undefined)[]) => {
-  const m = new Map<string, number>();
-  for (const v of vals) m.set(v ?? 'unknown', (m.get(v ?? 'unknown') ?? 0) + 1);
-  return [...m].sort((x, y) => y[1] - x[1]).map(([k, n]) => `${n} ${words(k)}`).join(' · ');
+// ---------- batch progress buckets ----------
+type BucketKey = 'posted' | 'skipped' | 'failed' | 'waiting' | 'queued' | 'other';
+const BUCKETS: { key: BucketKey; label: string; hint: string; statuses?: string[] }[] = [
+  { key: 'posted', label: 'Posted', hint: 'On TikTok', statuses: ['posted'] },
+  { key: 'skipped', label: 'Skipped', hint: 'Not eligible to post', statuses: ['skipped'] },
+  { key: 'failed', label: 'Failed', hint: 'Stopped with an error', statuses: ['failed'] },
+  { key: 'waiting', label: 'Waiting', hint: 'Reported “running”: in progress or awaiting retry', statuses: ['running'] },
+  { key: 'queued', label: 'Queued', hint: 'Not started yet', statuses: ['queued'] },
+  { key: 'other', label: 'Other', hint: 'Any other reported status' },
+];
+const KNOWN_STATUSES = new Set(BUCKETS.flatMap((b) => b.statuses ?? []));
+const inBucket = (status: string | undefined, key: BucketKey) => {
+  const b = BUCKETS.find((x) => x.key === key);
+  return b?.statuses ? b.statuses.includes(status ?? '') : !KNOWN_STATUSES.has(status ?? '');
 };
 
-function stageTotals(p: Pipeline) {
-  const items = p.batch?.items ?? [];
-  const wf = p.workflows;
-  const pubs = wf.filter((w) => w.publication);
-  const published = pubs.filter((w) => w.publication?.url || statusClass(w.publication?.status) === 'succeeded').length;
-  const pubFailed = pubs.filter((w) => statusClass(w.publication?.status) === 'failed').length;
-  const pres = wf.filter((w) => w.presentation);
-  const quizzes = pres.reduce((n, w) => n + (typeof w.presentation?.quiz_count === 'number' ? w.presentation.quiz_count : 0), 0);
-  const cls = (s?: string) => statusClass(s);
-  return [
-    { main: p.batch ? (typeof p.batch.total === 'number' ? p.batch.total : items.length) : null, sub: p.batch ? `${items.length} listed` : 'no active batch' },
-    { main: p.batch ? items.filter((i) => i.game_id).length : null, sub: p.batch ? `of ${items.length} listed have a game` : '–' },
-    { main: wf.length, sub: byState(wf.map((w) => w.state)) || 'none reported' },
-    { main: pres.length, sub: `${quizzes} quiz${quizzes === 1 ? '' : 'zes'} across presentations` },
-    { main: published, sub: `${pubs.length} record${pubs.length === 1 ? '' : 's'} · ${pubFailed} failed` },
-  ];
+/** Uses the queue's own counts when present; otherwise counts the listed items (and says so). */
+function batchProgress(b: Batch) {
+  const reported = b.counts && Object.values(b.counts).some((v) => typeof v === 'number' && Number.isFinite(v));
+  const raw: Record<string, number> = {};
+  if (reported) { for (const [k, v] of Object.entries(b.counts!)) if (typeof v === 'number' && Number.isFinite(v)) raw[k] = v; }
+  else for (const i of b.items) { const k = i.status ?? 'unknown'; raw[k] = (raw[k] ?? 0) + 1; }
+  const n: Record<BucketKey, number> = { posted: 0, skipped: 0, failed: 0, waiting: 0, queued: 0, other: 0 };
+  for (const [k, v] of Object.entries(raw)) n[BUCKETS.find((x) => x.statuses?.includes(k))?.key ?? 'other'] += v;
+  const counted = Object.values(n).reduce((a, x) => a + x, 0);
+  const total = typeof b.total === 'number' && Number.isFinite(b.total) ? b.total : b.items.length;
+  return { n, counted, total, source: reported ? 'queue counts' : 'listed items', unaccounted: Math.max(0, total - counted) };
+}
+
+// ---------- headline status ----------
+type Tone = 'bad' | 'warn' | 'ok' | 'idle';
+function postingState(p: Pipeline, now: number) {
+  const b = p.batch; const pol = p.policy;
+  const policyEnded = pol?.stop_at !== undefined && (toMs(pol.stop_at) ?? Infinity) <= now;
+  const notes: string[] = [];
+  if (pol?.enabled === false) notes.push(policyEnded ? `Auto-publish is off: the authorized posting window ended ${clock(toMs(pol.stop_at))}.` : 'Auto-publish policy is turned off, so nothing new is sent to TikTok.');
+  if (b?.status === 'provider_blocked') {
+    return { tone: 'bad' as Tone, pill: 'Blocked', headline: 'Posting is blocked by the social provider',
+      body: 'The batch reports “provider blocked”: the Naive social provider is not accepting posts, so no new TikTok posts are going out.', notes };
+  }
+  if (pol?.enabled === false) return { tone: 'warn' as Tone, pill: 'Paused', headline: 'Posting is paused', body: notes.shift() ?? '', notes };
+  const byStatus: Record<string, [Tone, string]> = {
+    running: ['ok', 'Batch is running'], queued: ['idle', 'Batch is queued to resume'], completed: ['ok', 'Batch completed'],
+    budget_limited: ['warn', 'Batch stopped at the budget limit'], time_limited: ['warn', 'Batch stopped at its stop time'], stopped: ['warn', 'Batch was stopped'],
+  };
+  if (!b) return { tone: 'idle' as Tone, pill: pol ? (pol.enabled ? 'On' : 'Unknown') : 'Unknown', headline: 'No batch reported', body: 'The endpoint is not reporting an overnight batch.', notes };
+  const [tone, headline] = byStatus[b.status ?? ''] ?? ['idle' as Tone, b.status ? `Batch status: ${words(b.status)}` : 'Batch status not reported'];
+  return { tone, pill: pol?.enabled === true ? 'On' : 'Unknown', headline, body: '', notes };
 }
 
 // ---------- table controls ----------
 const uniq = (vals: (string | undefined)[]) => [...new Set(vals.filter((v): v is string => !!v))].sort();
 
 /** Search + up to two select filters + fixed-size pages. Page survives polling; resets when filters change. */
-function useTableControls<T>(rows: T[], text: (r: T) => string, fields: { status: (r: T) => string | undefined; stage?: (r: T) => string | undefined }) {
+function useTableControls<T>(rows: T[], text: (r: T) => string, fields: { status: (r: T) => string | undefined; stage?: (r: T) => string | undefined }, resetKey = '') {
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('');
   const [stage, setStage] = useState('');
   const [page, setPage] = useState(0);
-  useEffect(() => setPage(0), [query, status, stage]);
+  useEffect(() => setPage(0), [query, status, stage, resetKey]);
   const q = query.trim().toLowerCase();
   const filtered = useMemo(() => rows.filter((r) =>
     (!status || fields.status(r) === status) && (!stage || fields.stage?.(r) === stage) && (!q || text(r).toLowerCase().includes(q)),
@@ -279,9 +335,14 @@ function Pager({ c, total, noun }: { c: Controls; total: number; noun: string })
 
 // ---------- view ----------
 const CONN_LABEL: Record<Conn, string> = { connecting: 'Connecting', live: 'Live', stale: 'Stale', offline: 'Offline' };
+type Focus = { stage: number | null; bucket: BucketKey | null };
+const NO_FOCUS: Focus = { stage: null, bucket: null };
 
 export function NaiveDashboard({ active }: { active: boolean }) {
   const { data, lastOk, error, failures, conn, now, polling, snapshotAt } = usePipeline(active);
+  const [focus, setFocus] = useState<Focus>(NO_FOCUS);
+  const posting = data ? postingState(data, now) : null;
+  const postingBlocked = data?.batch?.status === 'provider_blocked' || data?.policy?.enabled === false;
 
   return (
     <div className="naive">
@@ -289,19 +350,27 @@ export function NaiveDashboard({ active }: { active: boolean }) {
         <div className="panel-head">
           <div>
             <h2>Naive Crew Pipeline</h2>
-            <p className="muted small">Discovery → raw clips → analysis → portrait quizzes → TikTok posts. Read-only; values come straight from the local Naive integration.</p>
+            <p className="muted small">How each authorized clip becomes a TikTok portrait quiz, and where the batch is stuck. Read-only — every number comes from the local Naive integration.</p>
           </div>
-          <div className="naive-conn" role="status" aria-live="polite">
-            <span className={`naive-dot ${conn}`} aria-hidden="true" />
-            <b>{CONN_LABEL[conn]}</b>
-            <span className="muted small">{polling ? 'polling…' : `every ${POLL_MS / 1000}s`}</span>
+          <div className="naive-pills">
+            <div className="naive-pill" role="status" aria-live="polite" title="Whether this dashboard is receiving snapshots. It does not mean the workflow is healthy.">
+              <span className={`naive-dot ${conn}`} aria-hidden="true" />
+              <span><span className="naive-pill-k">Data feed</span><b>{CONN_LABEL[conn]}</b></span>
+              <span className="muted small">{polling ? 'polling…' : `every ${POLL_MS / 1000}s`}</span>
+            </div>
+            {posting && (
+              <div className={`naive-pill posting ${posting.tone}`} title="Whether new TikTok posts can go out, from batch status and publishing policy.">
+                <span className="naive-pill-icon" aria-hidden="true">{posting.tone === 'bad' ? '⛔' : posting.tone === 'warn' ? '⏸' : posting.tone === 'ok' ? '▶' : '•'}</span>
+                <span><span className="naive-pill-k">Posting</span><b>{posting.pill}</b></span>
+              </div>
+            )}
           </div>
         </div>
-        <dl className="naive-meta">
-          <div><dt>Snapshot updated</dt><dd title={clock(snapshotAt)}>{ago(snapshotAt, now)}</dd></div>
-          <div><dt>Last successful poll</dt><dd title={clock(lastOk)}>{ago(lastOk, now)}</dd></div>
-          <div><dt>Source</dt><dd><code>127.0.0.1:8011/pipeline</code></dd></div>
-        </dl>
+        <p className="naive-feednote small muted">
+          Snapshot {ago(snapshotAt, now)} · last successful poll {ago(lastOk, now)}
+          {data?.batch?.updated_at !== undefined && <> · queue last wrote its state {ago(toMs(data.batch.updated_at), now)}</>}
+          . “Live” only means the feed is connected.
+        </p>
         {error && (
           <div className={data ? 'alert warn' : 'alert error'}>
             {data
@@ -311,40 +380,346 @@ export function NaiveDashboard({ active }: { active: boolean }) {
         )}
       </section>
 
-      {!data ? (
+      {!data || !posting ? (
         <section className="panel"><p className="muted small">{conn === 'connecting' ? 'Waiting for the first pipeline snapshot…' : 'No pipeline data received yet. Nothing is shown until the endpoint reports it.'}</p></section>
       ) : (
         <div className={conn === 'live' ? 'naive-body' : 'naive-body dim'}>
-          <StageStrip data={data} />
+          <StatusBanner data={data} posting={posting} focus={focus} setFocus={setFocus} stale={conn !== 'live'} />
+          <Flow data={data} focus={focus} setFocus={setFocus} blocked={postingBlocked} />
           <div className="naive-grid">
-            <BudgetPanel budget={data.budget} workflows={data.workflows} />
-            <OpsPanel services={data.services} policy={data.policy} batch={data.batch} />
+            <NowPanel data={data} blocked={postingBlocked} />
+            <PostsPanel data={data} now={now} />
           </div>
-          <BatchTable batch={data.batch} />
-          <WorkflowTable workflows={data.workflows} now={now} />
-          <CrewTable crew={data.crew} />
+          <BatchTable batch={data.batch} focus={focus} setFocus={setFocus} />
+          <div className="naive-grid secondary">
+            <CrewRoles crew={data.crew} workflows={data.workflows} />
+            <BudgetPanel budget={data.budget} workflows={data.workflows} />
+          </div>
+          <details className="panel naive-more">
+            <summary><h3>Crew workflow history</h3><span className="muted small">all batches · {plural(data.workflows.length, 'job')} · filters, costs, publication errors</span></summary>
+            <WorkflowTable workflows={data.workflows} crew={data.crew} now={now} />
+          </details>
+          <details className="panel naive-more">
+            <summary><h3>Technical details</h3><span className="muted small">endpoint, services, policy, batch & agent IDs</span></summary>
+            <TechDetails data={data} lastOk={lastOk} snapshotAt={snapshotAt} />
+          </details>
         </div>
       )}
     </div>
   );
 }
 
-function StageStrip({ data }: { data: Pipeline }) {
-  const totals = stageTotals(data);
+function StatusBanner({ data, posting, focus, setFocus, stale }: {
+  data: Pipeline; posting: ReturnType<typeof postingState>; focus: Focus; setFocus: (f: Focus) => void; stale: boolean;
+}) {
+  const b = data.batch;
+  const prog = b ? batchProgress(b) : null;
+  const waiting = b?.items.filter((i) => i.status === 'running') ?? [];
   return (
-    <ol className="naive-stages" aria-label="Pipeline stages">
-      {STAGES.map((s, i) => (
-        <li key={s.key}>
-          <span className="naive-stage-n">{i + 1}</span>
-          <div>
-            <h4>{s.label}</h4>
-            <b className="naive-stage-v">{totals[i].main ?? '–'}</b>
-            <span className="naive-stage-sub">{totals[i].sub}</span>
-            <span className="naive-stage-hint">{s.hint}</span>
+    <section className={`panel naive-banner ${posting.tone}`} aria-labelledby="naive-banner-h">
+      <div className="naive-banner-top">
+        <span className="naive-banner-icon" aria-hidden="true">{posting.tone === 'bad' ? '⛔' : posting.tone === 'warn' ? '⏸' : posting.tone === 'ok' ? '▶' : 'ⓘ'}</span>
+        <div>
+          <p className="naive-kicker">Current status{stale && ' · last known (feed not live)'}</p>
+          <h3 id="naive-banner-h">{posting.headline}</h3>
+          {posting.body && <p>{posting.body}</p>}
+          {posting.notes.map((n) => <p key={n}>{n}</p>)}
+          {waiting.filter((w) => w.error).slice(0, 1).map((w) => (
+            <p key={w.id} className="naive-banner-quote">Latest note on <b>{w.name || w.id}</b>: “{w.error}”</p>
+          ))}
+          <p className="muted small">This dashboard is read-only and cannot resume posting.</p>
+        </div>
+      </div>
+      {b && prog && (
+        <div className="naive-progress">
+          <div className="naive-progress-head">
+            <h4>Batch progress</h4>
+            <span className="muted small">
+              {prog.n.posted + prog.n.skipped + prog.n.failed + prog.n.other} of {prog.total} finished · from {prog.source}
+              {prog.unaccounted > 0 && ` · ${prog.unaccounted} not in counts`}
+            </span>
           </div>
-        </li>
-      ))}
-    </ol>
+          <div className="naive-bar" role="img" aria-label={BUCKETS.filter((x) => prog.n[x.key] > 0).map((x) => `${prog.n[x.key]} ${x.label.toLowerCase()}`).join(', ') + ` of ${prog.total}`}>
+            {prog.total > 0 && BUCKETS.map((x) => prog.n[x.key] > 0 && <i key={x.key} className={x.key} style={{ width: `${(prog.n[x.key] / prog.total) * 100}%` }} />)}
+          </div>
+          <div className="naive-legend" role="group" aria-label="Filter batch videos by outcome">
+            {BUCKETS.filter((x) => x.key !== 'other' || prog.n.other > 0).map((x) => {
+              const on = focus.bucket === x.key;
+              return (
+                <button key={x.key} type="button" className={`naive-legend-btn ${x.key}${on ? ' on' : ''}`} aria-pressed={on} title={x.hint}
+                  onClick={() => setFocus({ ...focus, bucket: on ? null : x.key })}>
+                  <i aria-hidden="true" /><b>{prog.n[x.key]}</b><span>{x.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="muted small naive-legend-note">Counts are this batch only ({b.id ? <code>{b.id}</code> : 'unnamed'}). Click an outcome to list those videos.</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function Flow({ data, focus, setFocus, blocked }: { data: Pipeline; focus: Focus; setFocus: (f: Focus) => void; blocked: boolean }) {
+  const items = data.batch?.items ?? [];
+  const crewNames = new Set(data.crew.map((c) => (c.name ?? c.role ?? '').toLowerCase()));
+  const steps = FLOW.map((f, i) => {
+    const here = items.filter((it) => stageIndex(it.stage) === i);
+    const by = new Map<string, number>();
+    for (const it of here) by.set(it.status ?? 'unknown', (by.get(it.status ?? 'unknown') ?? 0) + 1);
+    const subs = new Map<string, number>();
+    if (f.raw.length > 1) for (const it of here) if (it.stage) subs.set(it.stage, (subs.get(it.stage) ?? 0) + 1);
+    const past = items.filter((it) => { const k = stageIndex(it.stage); return k !== null && k > i; }).length;
+    const running = here.filter((it) => it.status === 'running').length;
+    return { f, i, here: here.length, by, subs, past, running };
+  });
+  const unmapped = items.filter((it) => stageIndex(it.stage) === null).length;
+  const blockedAt = blocked ? 4 : null;
+  return (
+    <section className="panel naive-flow-panel" aria-labelledby="naive-flow-h">
+      <div className="panel-head">
+        <div>
+          <h3 id="naive-flow-h">How a video moves through the crew</h3>
+          <p className="muted small">Numbers are this batch’s videos at the step they were last reported at. Click a step to list its videos.</p>
+        </div>
+        {focus.stage !== null && <button type="button" className="ghost small" onClick={() => setFocus({ ...focus, stage: null })}>Show all steps</button>}
+      </div>
+      <div className="naive-key small" aria-hidden="true">
+        <span><i className="tag local">Local</i> PlayLattice code on this machine</span>
+        <span><i className="tag agent">Naive</i> Naive crew agents</span>
+      </div>
+      <ol className="naive-flow">
+        {steps.map(({ f, i, here, by, subs, past, running }) => {
+          const on = focus.stage === i;
+          const paused = data.batch?.status === 'provider_blocked';
+          const state = blockedAt === i ? 'blocked' : running > 0 && !paused ? 'active' : here > 0 ? 'holding' : 'idle';
+          const agents = f.agents.filter((a) => crewNames.has(a));
+          const stateLabel = state === 'blocked' ? 'Blocked' : paused && running > 0 ? `${running} waiting` : state === 'active' ? `${running} in progress` : null;
+          return (
+            <li key={f.key} className={`naive-step ${state}${on ? ' on' : ''}`}>
+              <button type="button" aria-pressed={on} onClick={() => setFocus({ ...focus, stage: on ? null : i })}
+                aria-label={`Step ${i + 1}, ${f.label}: ${here} video${here === 1 ? '' : 's'} here${stateLabel ? `, ${stateLabel}` : ''}. ${on ? 'Selected; press to show all.' : 'Press to list these videos.'}`}>
+                <span className="naive-step-top">
+                  <span className="naive-step-icon" aria-hidden="true">{f.icon}</span>
+                  <span className="naive-step-n">Step {i + 1}</span>
+                  {stateLabel && <span className={`naive-step-flag ${state}`}>{stateLabel}</span>}
+                </span>
+                <span className="naive-step-title">{f.label}</span>
+                <span className="naive-step-io"><em>In</em>{f.input}</span>
+                <span className="naive-step-io"><em>Out</em>{f.output}</span>
+                <span className="naive-step-who"><i className="tag local">Local</i>{f.local}</span>
+                {agents.length > 0 && <span className="naive-step-who"><i className="tag agent">Naive</i>{f.agentsDo}: {agents.join(', ')}</span>}
+                {f.note && <span className="naive-step-note">{f.note}</span>}
+                <span className="naive-step-count">
+                  <b>{here}</b><span>here now</span>
+                  {past > 0 && <span className="muted"> · {past} moved on</span>}
+                </span>
+                {here > 0 && (
+                  <span className="naive-step-by">
+                    {[...by].sort((a, b) => b[1] - a[1]).map(([s, n]) => <span key={s} className={`status ${statusClass(s)}`}>{n} {words(s)}</span>)}
+                  </span>
+                )}
+                {subs.size > 1 || (subs.size === 1 && f.raw.length > 1) ? (
+                  <span className="naive-step-sub muted">{[...subs].map(([s, n]) => `${n} at ${SUBSTEP[s] ?? words(s)}`).join(' · ')}</span>
+                ) : null}
+              </button>
+              {i < FLOW.length - 1 && <span className="naive-arrow" aria-hidden="true">→</span>}
+            </li>
+          );
+        })}
+      </ol>
+      {unmapped > 0 && <p className="muted small">{plural(unmapped, 'video')} reported a stage this view does not recognise; see the list below.</p>}
+    </section>
+  );
+}
+
+function StepPips({ stage }: { stage: string | undefined }) {
+  const idx = stageIndex(stage);
+  return (
+    <span className="naive-pips" aria-hidden="true">{FLOW.map((s, i) => <i key={s.key} className={idx === null ? '' : i < idx ? 'past' : i === idx ? 'now' : ''} />)}</span>
+  );
+}
+
+function NowPanel({ data, blocked }: { data: Pipeline; blocked: boolean }) {
+  const items = data.batch?.items ?? [];
+  const running = items.filter((i) => i.status === 'running');
+  const cur = running[0];
+  const next = items.find((i) => i.status === 'queued');
+  const idx = cur ? stageIndex(cur.stage) : null;
+  return (
+    <section className="panel naive-now" aria-labelledby="naive-now-h">
+      <div className="panel-head"><h3 id="naive-now-h">Current video</h3>{running.length > 1 && <span className="muted small">+{running.length - 1} more in progress</span>}</div>
+      {!data.batch ? <p className="muted small">No batch reported.</p> : !cur ? (
+        <>
+          <p className="small">No video is reported as in progress.</p>
+          {next && <p className="muted small">Next queued: <b>{next.name || next.id}</b> (not started)</p>}
+        </>
+      ) : (
+        <>
+          <VideoThumbnail className="naive-now-thumbnail" gameId={cur.game_id} title={cur.name || cur.id} />
+          <p className="naive-now-name"><SafeLink href={cur.source_url}>{cur.name || cur.id}</SafeLink> <Status value={data.batch?.status === 'provider_blocked' ? 'waiting' : cur.status} /></p>
+          <p className="naive-now-stage">
+            <StepPips stage={cur.stage} />
+            <span>{idx !== null ? <>Step {idx + 1} of 5 · <b>{FLOW[idx].label}</b></> : 'Stage not recognised'} <span className="muted">({words(cur.stage)})</span></span>
+          </p>
+          {cur.error && <p className={blocked ? 'naive-now-err bad' : 'naive-now-err'}>{cur.error}</p>}
+          <p className="naive-now-links small">
+            {cur.preview_url && <SafeLink href={cur.preview_url}>Preview ↗</SafeLink>}
+            {cur.post_url && <SafeLink href={cur.post_url}>TikTok ↗</SafeLink>}
+          </p>
+          {cur.camera_evidence && <p className="muted small">Camera: {cur.camera_evidence}</p>}
+          {next && <p className="muted small">Next queued: {next.name || next.id} (not started)</p>}
+        </>
+      )}
+    </section>
+  );
+}
+
+function PostsPanel({ data, now }: { data: Pipeline; now: number }) {
+  const fromBatch = (data.batch?.items ?? []).filter((i) => i.post_url)
+    .sort((a, b) => (toMs(b.completed_at) ?? 0) - (toMs(a.completed_at) ?? 0));
+  const pubs = data.workflows.filter((w) => w.publication);
+  const lifetimePosted = pubs.filter((w) => w.publication?.url || w.publication?.status === 'posted').length;
+  const fromHistory = fromBatch.length ? [] : pubs.filter((w) => w.publication?.url)
+    .sort((a, b) => (toMs(b.completed_at) ?? 0) - (toMs(a.completed_at) ?? 0));
+  return (
+    <section className="panel naive-posts" aria-labelledby="naive-posts-h">
+      <div className="panel-head">
+        <h3 id="naive-posts-h">Latest posts</h3>
+        <span className="muted small">{fromBatch.length ? `${fromBatch.length} in this batch` : 'none in this batch'}</span>
+      </div>
+      {fromBatch.length === 0 && fromHistory.length === 0 && <p className="muted small">No posted videos reported.</p>}
+      <ul className="naive-postlist">
+        {fromBatch.slice(0, 3).map((i) => (
+          <li key={i.id}>
+            <span className="naive-post-name"><b>{i.name || i.id}</b><span className="muted small">{toMs(i.completed_at) !== null ? `posted ${ago(toMs(i.completed_at), now)}` : 'post time not reported'}</span></span>
+            <span className="naive-post-links">
+              {i.preview_url && <SafeLink className="naive-linkbtn" href={i.preview_url}>Preview ↗</SafeLink>}
+              <SafeLink className="naive-linkbtn primary" href={i.post_url}>TikTok ↗</SafeLink>
+            </span>
+          </li>
+        ))}
+        {fromHistory.slice(0, 3).map((w) => (
+          <li key={w.job_id}>
+            <span className="naive-post-name"><b>Job {short(w.job_id)}</b><span className="muted small">from workflow history</span></span>
+            <span className="naive-post-links">
+              {w.presentation?.preview_uri && <SafeLink className="naive-linkbtn" href={w.presentation.preview_uri}>Preview ↗</SafeLink>}
+              <SafeLink className="naive-linkbtn primary" href={w.publication?.url}>TikTok ↗</SafeLink>
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="muted small">All batches (workflow history): {plural(lifetimePosted, 'publication')} posted of {plural(pubs.length, 'record')}.</p>
+    </section>
+  );
+}
+
+const EMPTY_ITEMS: BatchItem[] = [];
+function BatchTable({ batch, focus, setFocus }: { batch: Batch | null; focus: Focus; setFocus: (f: Focus) => void }) {
+  const all = batch?.items ?? EMPTY_ITEMS;
+  const items = useMemo(() => all.filter((i) =>
+    (focus.stage === null || stageIndex(i.stage) === focus.stage) && (focus.bucket === null || inBucket(i.status, focus.bucket))), [all, focus]);
+  const c = useTableControls(items, (i) => [i.id, i.name, i.stage, i.status, i.game_id, i.job_id, i.error].join(' '),
+    { status: (i) => i.status, stage: (i) => i.stage }, `${focus.stage}-${focus.bucket}`);
+  const focused = focus.stage !== null || focus.bucket !== null;
+  const focusText = [focus.stage !== null && `Step ${focus.stage + 1} · ${FLOW[focus.stage].label}`, focus.bucket && BUCKETS.find((b) => b.key === focus.bucket)?.label].filter(Boolean).join(' + ');
+  return (
+    <section className="panel" id="naive-batch-list" aria-labelledby="naive-batch-h">
+      <div className="panel-head">
+        <h3 id="naive-batch-h">Batch Videos</h3>
+        <span className="muted small">{batch ? plural(all.length, 'item') : 'no active batch'}</span>
+      </div>
+      {focused && (
+        <div className="naive-focusbar" role="status">
+          <span>Showing <b>{focusText}</b> — {items.length} of {all.length} videos</span>
+          <button type="button" className="secondary small" onClick={() => setFocus(NO_FOCUS)}>Show all videos</button>
+        </div>
+      )}
+      {!batch || all.length === 0 ? <p className="muted small">{batch ? 'The batch has no items yet.' : 'No discovery batch is running.'}</p> : (<>
+        <TableToolbar id="naive-batch" c={c} placeholder="Name, id, game, job, error…" />
+        <div className="player-table-scroll">
+          <table className="player-table naive-table">
+            <thead><tr><th scope="col">Video</th><th scope="col">Step</th><th scope="col">Status</th><th scope="col">Preview</th><th scope="col">TikTok</th></tr></thead>
+            <tbody>
+              {c.visible.length === 0 && <tr><td colSpan={5} className="muted">No videos match these filters.</td></tr>}
+              {c.visible.map((it) => {
+                const idx = stageIndex(it.stage);
+                return (
+                  <tr key={it.id} className={statusClass(it.status) === 'failed' ? 'naive-row-bad' : statusClass(it.status) === 'cancelled' ? 'naive-row-off' : undefined}>
+                    <th scope="row" className="naive-wrap">
+                      <div className="naive-video-cell">
+                      <VideoThumbnail gameId={it.game_id} title={it.name || it.id} />
+                      <div>
+                      <SafeLink href={it.source_url}>{it.name || short(it.id)}</SafeLink>
+                      {it.error && <span className="naive-err">{it.error}</span>}
+                      {(it.game_id || it.job_id || it.camera_evidence) && (
+                        <details className="naive-ids">
+                          <summary>Details</summary>
+                          <span>id <code>{it.id}</code></span>
+                          {it.game_id && <span>game <code>{it.game_id}</code></span>}
+                          {it.job_id && <span>job <code>{it.job_id}</code></span>}
+                          {it.camera_evidence && <span>camera: {it.camera_evidence}</span>}
+                        </details>
+                      )}
+                      </div>
+                      </div>
+                    </th>
+                    <td>
+                      <span className="naive-stagecell">
+                        <StepPips stage={it.stage} />
+                        <span>{idx !== null ? FLOW[idx].label : words(it.stage)}</span>
+                        <span className="table-note">{words(it.stage)}</span>
+                      </span>
+                    </td>
+                    <td><Status value={it.status} /></td>
+                    <td><SafeLink href={it.preview_url}>Preview ↗</SafeLink></td>
+                    <td><SafeLink href={it.post_url}>Post ↗</SafeLink></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <Pager c={c} total={items.length} noun="videos" />
+      </>)}
+    </section>
+  );
+}
+
+const ROLE_INFO: Record<string, { what: string; step: string }> = {
+  ceo: { what: 'Coordinates the crew on each job', step: 'Analyze Play' },
+  scout: { what: 'Reads the local analysis evidence', step: 'Analyze Play' },
+  clipper: { what: 'Picks source-bound clips, then quiz moments & music', step: 'Analyze Play · Portrait Quizzes' },
+  'caption-editor': { what: 'Writes hedged captions (identities stay unverified)', step: 'Analyze Play' },
+  'channel-manager': { what: 'Owns the publication hand-off to the local publisher', step: 'Post To TikTok' },
+  analyst: { what: 'Feedback review of the package', step: 'Analyze Play' },
+};
+
+function CrewRoles({ crew, workflows }: { crew: CrewMember[]; workflows: Workflow[] }) {
+  const sessions = new Map<string, number>();
+  for (const w of workflows) for (const m of w.members ?? []) if (m.agent_id) sessions.set(m.agent_id, (sessions.get(m.agent_id) ?? 0) + 1);
+  return (
+    <section className="panel naive-crew" aria-labelledby="naive-crew-h">
+      <div className="panel-head"><h3 id="naive-crew-h">Who does what</h3><span className="muted small">{plural(crew.length, 'Naive agent')}</span></div>
+      {crew.length === 0 ? <p className="muted small">No crew reported.</p> : (
+        <ul className="naive-rolelist">
+          {crew.map((c, i) => {
+            const key = (c.name ?? c.role ?? '').toLowerCase();
+            const info = ROLE_INFO[key];
+            const n = c.id ? sessions.get(c.id) : undefined;
+            return (
+              <li key={c.id ?? i}>
+                <i className="tag agent" aria-hidden="true">Naive</i>
+                <span><b>{c.name ?? '–'}</b><span className="muted small"> · {info ? info.step : 'step not mapped'}</span>
+                  <span className="naive-role-what">{info?.what ?? (c.role ? `Role: ${c.role}` : 'Role not reported')}</span></span>
+                <span className="muted small naive-role-n" title="Sessions recorded across all workflow history">{n !== undefined ? plural(n, 'session') : key === 'ceo' ? 'coordinator' : 'no sessions listed'}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <p className="muted small">Detection, pose, tracking, rendering and the final post request run as local PlayLattice code, not as agents.</p>
+    </section>
   );
 }
 
@@ -355,8 +730,8 @@ function BudgetPanel({ budget, workflows }: { budget: Budget | null; workflows: 
   const reserved = workflows.filter((w) => statusClass(w.state) === 'running' || statusClass(w.state) === 'queued')
     .reduce((n, w) => n + (typeof w.reserved === 'number' ? w.reserved : 0), 0);
   return (
-    <section className="panel">
-      <div className="panel-head"><h3>Spend</h3><span className="muted small">accounted by the integration</span></div>
+    <section className="panel naive-spendpanel">
+      <div className="panel-head"><h3>Spend</h3><span className="muted small">this month, accounted by the integration</span></div>
       {!budget ? <p className="muted small">No budget reported.</p> : (
         <>
           <p className="naive-spend"><b>{usd(used)}</b> <span className="muted">of {usd(cap)} monthly cap</span></p>
@@ -376,99 +751,65 @@ function BudgetPanel({ budget, workflows }: { budget: Budget | null; workflows: 
   );
 }
 
-function OpsPanel({ services, policy, batch }: { services: Record<string, string>; policy: Policy | null; batch: Batch | null }) {
+function TechDetails({ data, lastOk, snapshotAt }: { data: Pipeline; lastOk: number | null; snapshotAt: number | null }) {
+  const { services, policy, batch, crew } = data;
   const counts = Object.entries(batch?.counts ?? {}).filter(([, v]) => typeof v === 'number');
   return (
-    <section className="panel">
-      <div className="panel-head"><h3>Services & Policy</h3></div>
+    <div className="naive-tech">
       <dl className="naive-meta">
+        <div><dt>Source</dt><dd><code>127.0.0.1:8011/pipeline</code> <span className="muted small">(via {ENDPOINT})</span></dd></div>
+        <div><dt>Snapshot updated</dt><dd>{clock(snapshotAt)}</dd></div>
+        <div><dt>Last successful poll</dt><dd>{clock(lastOk)}</dd></div>
         {Object.keys(services).length === 0 && <div><dt>Services</dt><dd className="muted">not reported</dd></div>}
         {Object.entries(services).map(([k, v]) => <div key={k}><dt>{words(k)}</dt><dd><Status value={v} /></dd></div>)}
-        <div><dt>Auto-publish</dt><dd>{policy ? (policy.enabled ? <span className="status succeeded">enabled</span> : <span className="status none">disabled</span>) : <span className="muted">not reported</span>}</dd></div>
+        <div><dt>Auto-publish policy</dt><dd>{policy ? (policy.enabled ? <span className="status succeeded">enabled</span> : <span className="status none">disabled</span>) : <span className="muted">not reported</span>}</dd></div>
         {policy && <div><dt>Platform · visibility</dt><dd>{words(policy.platform)} · {words(policy.visibility)}</dd></div>}
-        <div><dt>Batch</dt><dd>{batch ? <><Status value={batch.status} /> <code>{short(batch.id)}</code></> : <span className="muted">none active</span>}</dd></div>
+        {policy?.stop_at !== undefined && <div><dt>Posting window ends</dt><dd>{clock(toMs(policy.stop_at))}</dd></div>}
+        <div><dt>Batch</dt><dd>{batch ? <><Status value={batch.status} /> <code>{batch.id ?? '–'}</code></> : <span className="muted">none active</span>}</dd></div>
         {batch?.stop_at !== undefined && <div><dt>Batch stops</dt><dd>{clock(toMs(batch.stop_at))}</dd></div>}
+        {batch?.updated_at !== undefined && <div><dt>Queue state written</dt><dd>{clock(toMs(batch.updated_at))}</dd></div>}
       </dl>
-      {counts.length > 0 && (
-        <p className="naive-counts small">{counts.map(([k, v]) => <span key={k}><b>{v}</b> {words(k)}</span>)}</p>
-      )}
-    </section>
-  );
-}
-
-function StageCell({ stage }: { stage: string | undefined }) {
-  const idx = stageIndex(stage);
-  return (
-    <span className="naive-stagecell">
-      <span className="naive-pips" aria-hidden="true">{STAGES.map((s, i) => <i key={s.key} className={idx === null ? '' : i < idx ? 'past' : i === idx ? 'now' : ''} />)}</span>
-      {words(stage)}
-    </span>
-  );
-}
-
-const EMPTY_ITEMS: BatchItem[] = [];
-function BatchTable({ batch }: { batch: Batch | null }) {
-  const items = batch?.items ?? EMPTY_ITEMS;
-  const c = useTableControls(items, (i) => [i.id, i.name, i.stage, i.status, i.game_id, i.job_id, i.error].join(' '), { status: (i) => i.status, stage: (i) => i.stage });
-  return (
-    <section className="panel">
-      <div className="panel-head">
-        <h3>Batch Videos</h3>
-        <span className="muted small">{batch ? `${batch.items.length} item${batch.items.length === 1 ? '' : 's'}` : 'no active batch'}</span>
-      </div>
-      {!batch || batch.items.length === 0 ? <p className="muted small">{batch ? 'The batch has no items yet.' : 'No discovery batch is running.'}</p> : (<>
-        <TableToolbar id="naive-batch" c={c} placeholder="Name, id, game, job, error…" />
+      {counts.length > 0 && <p className="naive-counts small">Raw batch counts: {counts.map(([k, v]) => <span key={k}><b>{v}</b> {words(k)}</span>)}</p>}
+      {crew.length > 0 && (
         <div className="player-table-scroll">
           <table className="player-table naive-table">
-            <thead><tr><th scope="col">Video</th><th scope="col">Stage</th><th scope="col">Status</th><th scope="col">Game · Job</th><th scope="col">Preview</th><th scope="col">TikTok</th></tr></thead>
+            <caption className="muted small">Naive crew agent IDs</caption>
+            <thead><tr><th scope="col">Agent</th><th scope="col">Role</th><th scope="col">ID</th></tr></thead>
             <tbody>
-              {c.visible.length === 0 && <tr><td colSpan={6} className="muted">No videos match these filters.</td></tr>}
-              {c.visible.map((it) => (
-                <tr key={it.id} className={statusClass(it.status) === 'failed' ? 'naive-row-bad' : statusClass(it.status) === 'cancelled' ? 'naive-row-off' : undefined}>
-                  <th scope="row" className="naive-wrap">
-                    <SafeLink href={it.source_url}>{it.name || short(it.id)}</SafeLink>
-                    {it.error && <span className="naive-err">{it.error}</span>}
-                  </th>
-                  <td><StageCell stage={it.stage} /></td>
-                  <td><Status value={it.status} /></td>
-                  <td><code>{short(it.game_id)}</code> · <code>{short(it.job_id)}</code></td>
-                  <td><SafeLink href={it.preview_url}>Preview ↗</SafeLink></td>
-                  <td><SafeLink href={it.post_url}>Post ↗</SafeLink></td>
-                </tr>
+              {crew.map((c, i) => (
+                <tr key={c.id ?? i}><th scope="row">{c.name ?? '–'}</th><td>{c.role ?? '–'}</td><td><code>{c.id ?? '–'}</code></td></tr>
               ))}
             </tbody>
           </table>
         </div>
-        <Pager c={c} total={items.length} noun="videos" />
-      </>)}
-    </section>
+      )}
+    </div>
   );
 }
 
-function WorkflowTable({ workflows, now }: { workflows: Workflow[]; now: number }) {
+function WorkflowTable({ workflows, crew, now }: { workflows: Workflow[]; crew: CrewMember[]; now: number }) {
   const rows = useMemo(() => [...workflows].sort((a, b) => (b.created_ms ?? 0) - (a.created_ms ?? 0)), [workflows]);
+  const names = useMemo(() => new Map(crew.filter((c) => c.id).map((c) => [c.id as string, c.name ?? c.role ?? c.id as string])), [crew]);
   const c = useTableControls(rows, (w) => [w.job_id, w.game_id, w.state, w.publication?.status, w.publication?.error, w.publication?.post_id].join(' '),
     { status: (w) => w.state, stage: (w) => (w.publication ? `post ${w.publication.status ?? 'unknown'}` : w.presentation ? 'portrait ready' : 'no portrait') });
   return (
-    <section className="panel">
-      <div className="panel-head">
-        <h3>Crew Workflows</h3>
-        <span className="muted small">analysis → portrait quiz → publication, per job</span>
-      </div>
+    <div className="naive-more-body">
+      <p className="muted small">One row per analysis job across every batch (not just tonight). Analysis → portrait quiz → publication.</p>
       {rows.length === 0 ? <p className="muted small">No workflows reported.</p> : (<>
         <TableToolbar id="naive-wf" c={c} placeholder="Job, game, post id, error…" statusLabel="Analysis" stageLabel="Output" />
         <div className="player-table-scroll">
           <table className="player-table naive-table">
             <thead><tr>
               <th scope="col">Job · Game</th><th scope="col">Analysis</th><th scope="col">Started</th><th scope="col">Finished</th>
-              <th scope="col">Cost · Reserved</th><th scope="col">Portrait quiz</th><th scope="col">Publication</th>
+              <th scope="col">Cost · Reserved</th><th scope="col">Portrait quiz</th><th scope="col">Publication</th><th scope="col">Crew sessions</th>
             </tr></thead>
             <tbody>
-              {c.visible.length === 0 && <tr><td colSpan={7} className="muted">No workflows match these filters.</td></tr>}
+              {c.visible.length === 0 && <tr><td colSpan={8} className="muted">No workflows match these filters.</td></tr>}
               {c.visible.map((w) => {
                 const p = w.presentation; const pub = w.publication;
                 const created = toMs(w.created_ms); const done = toMs(w.completed_at);
                 const music = p?.quiz_music_missing;
+                const members = w.members ?? [];
                 return (
                   <tr key={w.job_id} className={statusClass(w.state) === 'failed' || statusClass(pub?.status) === 'failed' ? 'naive-row-bad' : statusClass(w.state) === 'cancelled' ? 'naive-row-off' : undefined}>
                     <th scope="row"><code title={w.job_id}>{short(w.job_id)}</code><span className="table-note">game <code title={w.game_id}>{short(w.game_id)}</code></span></th>
@@ -496,6 +837,16 @@ function WorkflowTable({ workflows, now }: { workflows: Workflow[]; now: number 
                         </>
                       )}
                     </td>
+                    <td className="naive-wrap">
+                      {members.length === 0 ? <span className="muted">–</span> : (
+                        <details className="naive-ids">
+                          <summary>{plural(members.length, 'agent')}</summary>
+                          {members.map((m, k) => (
+                            <span key={m.session_id ?? k}>{m.agent_id ? names.get(m.agent_id) ?? short(m.agent_id, 12) : '–'} · {words(m.status)}{m.cost_micro_usd !== undefined && ` · ${usd(m.cost_micro_usd)}`} <code>{m.session_id ?? '–'}</code></span>
+                          ))}
+                        </details>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -504,30 +855,6 @@ function WorkflowTable({ workflows, now }: { workflows: Workflow[]; now: number 
         </div>
         <Pager c={c} total={rows.length} noun="workflows" />
       </>)}
-    </section>
-  );
-}
-
-function CrewTable({ crew }: { crew: CrewMember[] }) {
-  return (
-    <section className="panel">
-      <div className="panel-head"><h3>Crew Agents</h3><span className="muted small">{crew.length} agent{crew.length === 1 ? '' : 's'}</span></div>
-      {crew.length === 0 ? <p className="muted small">No crew reported.</p> : (
-        <div className="player-table-scroll">
-          <table className="player-table naive-table">
-            <thead><tr><th scope="col">Agent</th><th scope="col">Role</th><th scope="col">ID</th></tr></thead>
-            <tbody>
-              {crew.map((c, i) => (
-                <tr key={c.id ?? i}>
-                  <th scope="row">{c.name ?? '–'}</th>
-                  <td className="naive-wrap naive-role">{c.role ?? '–'}</td>
-                  <td><code title={c.id}>{c.id ? short(c.id, 14) : '–'}</code></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
+    </div>
   );
 }

@@ -58,6 +58,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 const enc = encodeURIComponent;
 
 export const api = {
+  libraryStatus: (signal?: AbortSignal) => request<Items<{ game_id: string; status: Job['status']; phase: string | null }>>('/api/library/status', { signal }).then(r => r.items),
   listGames: (signal?: AbortSignal) => request<Items<Game>>('/api/games', { signal }).then((r) => r.items),
 
   loadSample: () => request<Game>('/api/games/sample?auto_analyze=true', { method: 'POST' }),

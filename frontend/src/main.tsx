@@ -17,50 +17,41 @@ import './styles.css';
 const errorText = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback);
 
 // Latest analysis job per game, for the library badges. `null` = never analyzed.
-type LibraryStatus = Record<string, Job | null>;
+type LibraryJob = { status: Job['status']; phase: string | null };
+type LibraryStatus = Record<string, LibraryJob | null>;
 
-function useLibraryStatus(games: Game[] | null): LibraryStatus {
+function useLibraryStatus(games: Game[] | null, active: boolean): LibraryStatus {
   const [status, setStatus] = useState<LibraryStatus>({});
-  const ids = (games ?? []).map((g) => g.game_id).join(',');
-  const anyActive = Object.values(status).some((j) => !!j && !isTerminal(j));
+  const ids = (games ?? []).map(g => g.game_id).join(',');
+  const anyActive = Object.values(status).some(j => j && ['queued', 'running', 'cancelling'].includes(j.status));
 
   useEffect(() => {
-    if (!ids) return;
+    if (!ids || !active) return;
     const ctrl = new AbortController();
+    let fetching = false;
     const refresh = async () => {
-      const entries = await Promise.all(
-        ids.split(',').map(async (id) => {
-          try {
-            const jobs = await api.listJobs(id, ctrl.signal);
-            return [id, jobs[jobs.length - 1] ?? null] as const;
-          } catch {
-            return null; // keep the previous badge on a transient error
-          }
-        }),
-      );
-      if (ctrl.signal.aborted) return;
-      setStatus((prev) => {
-        const next = { ...prev };
-        for (const e of entries) if (e) next[e[0]] = e[1];
-        return next;
-      });
+      if (fetching || document.hidden) return;
+      fetching = true;
+      try {
+        const rows = await api.libraryStatus(ctrl.signal);
+        if (ctrl.signal.aborted) return;
+        const latest = new Map(rows.map(row => [row.game_id, row]));
+        setStatus(Object.fromEntries(ids.split(',').map(id => [id, latest.get(id) ?? null])));
+      } catch { /* Keep the last badge snapshot on a transient read failure. */ }
+      finally { fetching = false; }
     };
     void refresh();
     const timer = window.setInterval(() => void refresh(), anyActive ? 3000 : 15000);
-    return () => {
-      ctrl.abort();
-      window.clearInterval(timer);
-    };
-  }, [ids, anyActive]);
-
+    return () => { ctrl.abort(); window.clearInterval(timer); };
+  }, [ids, anyActive, active]);
   return status;
 }
 
-function libraryBadge(job: Job | null | undefined): { cls: string; text: string } {
+function libraryBadge(job: LibraryJob | null | undefined): { cls: string; text: string } {
   if (job === undefined) return { cls: 'none', text: 'checking…' };
   if (job === null) return { cls: 'none', text: 'not analyzed' };
   if (job.status === 'succeeded') return { cls: 'succeeded', text: 'processed' };
-  if (job.status === 'running') return { cls: 'running', text: `processing · ${job.phase}` };
+  if (job.status === 'running') return { cls: 'running', text: `processing · ${job.phase || 'analyzing'}` };
   if (job.status === 'queued') return { cls: 'queued', text: 'waiting' };
   if (job.status === 'cancelling') return { cls: 'queued', text: 'cancelling' };
   if (job.status === 'cancelled') return { cls: 'none', text: 'cancelled' };
@@ -99,7 +90,7 @@ function App() {
   };
 
   const selected = games?.find((g) => g.game_id === selectedId) ?? null;
-  const library = useLibraryStatus(games);
+  const library = useLibraryStatus(games, view === 'film');
   const jobsKnown = Object.values(library);
   const counts = {
     done: jobsKnown.filter((j) => j?.status === 'succeeded').length,

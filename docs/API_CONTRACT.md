@@ -103,3 +103,5 @@ Queueing failures preserve the uploaded source/game and surface a durable `analy
 ### Video thumbnails
 
 `GET /api/games/{game_id}/thumbnail` returns a cached 480×270 JPEG from the registered source at an early interior timestamp. Aspect ratio is preserved with padding; no inference runs. The cache is keyed by immutable source hash and render profile, with private one-day HTTP caching. Unknown games/missing sources return 404; unavailable decoding returns 503. Generation uses at most two single-threaded FFmpeg processes and a 20-second timeout. Callers cannot supply filesystem paths. The Game Library lazy-loads stills and shows a neutral video placeholder on failure.
+
+`GET /api/library/status` returns compact latest-job badges for visible games as `{items:[{game_id,job_id,status,phase}]}`. Reports, tracks and filesystem paths are excluded. The library reads one batch instead of requesting every game's full history, and pauses badge polling while the Naive Crew view is open.
