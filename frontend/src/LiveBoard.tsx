@@ -166,7 +166,7 @@ export function LiveBoard(props: {
         <b>{Math.round(pct)}%<small> Film Processed</small></b>
       </div>
 
-      <details className="leaders"><summary>Film review queue</summary>
+      <details className="leaders"><summary>Film Review Queue</summary>
         <div className="leaders-head">
           <h3>Film Review Queue</h3>
           <div className="seg-toggle" role="tablist">

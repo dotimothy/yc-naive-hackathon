@@ -1,3 +1,4 @@
+import {batchCancelled} from './batch-control.js';
 import {readFile,writeFile,rename,open,unlink} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
@@ -10,8 +11,8 @@ try{const pid=Number(await readFile(lockPath,'utf8'));try{process.kill(pid,0);th
 const lock=await open(lockPath,'wx',0o600);await lock.writeFile(String(process.pid));await lock.close();
 let stopping=false;for(const sig of ['SIGTERM','SIGINT'] as const)process.on(sig,()=>{stopping=true;});
 const batch=JSON.parse(await readFile(folder+'overnight-state.json','utf8'));
-const save=async()=>{batch.updated_at=new Date().toISOString();batch.counts={};for(const r of batch.items)batch.counts[r.status]=(batch.counts[r.status]||0)+1;await writeFile(folder+'overnight-state.json.tmp',JSON.stringify(batch,null,2),{mode:0o600});await rename(folder+'overnight-state.json.tmp',folder+'overnight-state.json');};
-const active=()=>!stopping&&Date.now()<Date.parse(batch.stop_at);
+const save=async()=>{if(batchCancelled(folder,batch.id)){batch.status='cancelled';for(const row of batch.items)if(['queued','running'].includes(row.status))row.status='cancelled';}batch.updated_at=new Date().toISOString();batch.counts={};for(const r of batch.items)batch.counts[r.status]=(batch.counts[r.status]||0)+1;await writeFile(folder+'overnight-state.json.tmp',JSON.stringify(batch,null,2),{mode:0o600});await rename(folder+'overnight-state.json.tmp',folder+'overnight-state.json');};
+const active=()=>!batchCancelled(folder,batch.id)&&!stopping&&Date.now()<Date.parse(batch.stop_at);
 const api=async(path:string,init:RequestInit={})=>{const r=await fetch('http://127.0.0.1:8000'+path,{...init,signal:AbortSignal.timeout(120000)});if(!r.ok)throw Error(`Local API ${r.status}: ${(await r.text()).slice(0,180)}`);return r.json();};
 const stage=async(row:any,name:string)=>{row.stage=name;row.status='running';await save();console.log(JSON.stringify({event:'overnight_stage',id:row.id,stage:name}));};
 try{

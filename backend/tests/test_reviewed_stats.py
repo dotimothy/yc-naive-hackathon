@@ -96,3 +96,57 @@ def test_api_review_validates_source_time_and_persists_evidence(client, video):
     )
     assert s["points"] == 2 and s["field_goals_attempted"] == 1
     assert client.get(path).json()["players"] == response.json()["players"]
+
+
+def test_short_clip_possession_union_and_pass_evidence():
+    b = ledger(["possession", "possession", "pass"])
+    b["candidates"][0]["review"].update(event_time_ms=0, possession_end_ms=3000)
+    b["candidates"][1]["review"].update(event_time_ms=1000, possession_end_ms=5000)
+    s = stats(b)
+    assert s["possession_ms"] == 5000  # Overlapping review windows count once.
+    assert s["passes"] == 1
+    b["candidates"][0]["review"]["actor_confirmed"] = False
+    assert stats(b)["possession_ms"] == 4000
+    b["candidates"][1]["review"]["possession_end_ms"] = 40000
+    assert stats(b)["possession_ms"] is None
+    assert stats(ledger(["rebound"]))["passes"] is None
+
+
+def test_possession_review_requires_valid_interval(client, video):
+    _, _, path = seed_game(client, video)
+    c = client.get(path).json()["candidates"][0]
+    route = path + "/candidates/" + c["candidate_id"] + "/review"
+    body = dict(
+        decision="approved",
+        event_type="possession",
+        actor_confirmed=True,
+        event_time_ms=c["start_ms"],
+        possession_end_ms=c["end_ms"],
+    )
+    assert (
+        client.put(route, json={**body, "possession_end_ms": c["start_ms"]}).status_code
+        == 422
+    )
+    assert (
+        client.put(
+            route, json={**body, "possession_end_ms": c["end_ms"] + 1}
+        ).status_code
+        == 422
+    )
+    result = client.put(route, json=body)
+    assert result.status_code == 200
+    assert any(
+        p["basketball_stats"]["possession_ms"] == c["end_ms"] - c["start_ms"]
+        for p in result.json()["players"]
+    )
+    result = client.put(
+        route,
+        json=dict(
+            decision="approved",
+            event_type="pass",
+            actor_confirmed=True,
+            event_time_ms=c["start_ms"],
+        ),
+    )
+    assert result.status_code == 200
+    assert any(p["basketball_stats"]["passes"] == 1 for p in result.json()["players"])

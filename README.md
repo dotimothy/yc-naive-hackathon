@@ -1,3 +1,5 @@
+<img src="frontend/public/favicon.png" alt="PlayLattice logo" width="180" />
+
 # PlayLattice
 
 Turn basketball footage into a film room with player tracking, ball and hoop observations, reviewable basketball stats, and source-linked highlight clips.
@@ -25,6 +27,19 @@ The film room uses tabs for playback, players/highlights, camera shots, ball/hoo
 Jobs, review state and replayable updates persist in SQLite. Uploaded media, model weights and generated videos remain in ignored local storage.
 
 ## Run locally
+
+From the repository root, install dependencies, model weights, and the sample once, then start the app:
+
+```sh
+./setup.sh
+./run.sh
+```
+
+Open **http://127.0.0.1:5173**. The runner starts the API, frontend, and existing configured Naive crew, reusing services already running. Ctrl-C stops only services it started. Logs are in `data/logs/`. It does not enable publishing or create Naive accounts or agents. On a fresh checkout, Naive onboarding and private crew configuration are separate; Film Room still runs without them.
+
+Use `./setup.sh --check` to check installed prerequisites and `./run.sh --check` to check running services. Setup supports `--skip-models`, `--skip-sample`, and `--no-ball`; the runner supports `--no-crew` for local analysis only. Node.js with `node:sqlite` support (22.13+) and Python 3.9–3.12 are required by the pinned dependencies. Set `PLAYLATTICE_PYTHON` when selecting Python for initial setup.
+
+Manual setup is also available:
 
 Requires Python, Node.js/npm, and FFmpeg/ffprobe. The current setup has been exercised on macOS arm64 with Python 3.9.6; see the [local setup guide](docs/LOCAL_PROTOTYPE.md) for platform notes.
 

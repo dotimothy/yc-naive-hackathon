@@ -197,6 +197,8 @@ def generate_highlights(
 class Review(BaseModel):
     decision: Literal["approved", "rejected", "pending"]
     event_type: Literal[
+        "pass",
+        "possession",
         "visual_activity",
         "made_shot",
         "missed_shot",
@@ -209,6 +211,7 @@ class Review(BaseModel):
         "turnover",
     ] = "visual_activity"
     event_time_ms: Optional[int] = Field(default=None, ge=0)
+    possession_end_ms: Optional[int] = Field(default=None, ge=0)
     points: Optional[Literal[1, 2, 3]] = None
     actor_confirmed: bool = False
     distinct_event_confirmed: bool = False
@@ -229,6 +232,22 @@ def review_candidate(game_id: str, candidate_id: str, body: Review):
         if body.decision != "approved" and body.event_type != "visual_activity":
             raise HTTPException(422, "Basketball outcomes require an approved review")
         if body.decision == "approved":
+            if body.event_type == "possession" and not (
+                body.event_time_ms is not None
+                and body.possession_end_ms is not None
+                and candidate["start_ms"]
+                <= body.event_time_ms
+                < body.possession_end_ms
+                <= candidate["end_ms"]
+            ):
+                raise HTTPException(
+                    422,
+                    "Possession needs start and end times inside the candidate source range",
+                )
+            if body.event_type != "possession" and body.possession_end_ms is not None:
+                raise HTTPException(
+                    422, "Possession end time only applies to possession intervals"
+                )
             if (
                 body.event_time_ms is not None
                 and not candidate["start_ms"]

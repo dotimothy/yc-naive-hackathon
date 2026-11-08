@@ -58,6 +58,8 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 const enc = encodeURIComponent;
 
 export const api = {
+  removeGame: (id: string) => request(`/api/games/${enc(id)}`, { method: 'DELETE' }),
+  restoreGame: (id: string) => request<Game>(`/api/games/${enc(id)}/restore`, { method: 'POST' }),
   libraryStatus: (signal?: AbortSignal) => request<Items<{ game_id: string; status: Job['status']; phase: string | null }>>('/api/library/status', { signal }).then(r => r.items),
   listGames: (signal?: AbortSignal) => request<Items<Game>>('/api/games', { signal }).then((r) => r.items),
 

@@ -28,6 +28,8 @@ from backend.app.basketball_routes import router as basketball_router
 from backend.app.shot_routes import router as shot_router
 from backend.app.thumbnail_routes import router as thumbnail_router
 from backend.app.library_routes import router as library_router
+from backend.app.naive_routes import router as naive_router
+from backend.app.mail_preview_routes import router as mail_preview_router
 from workers.video.sports.basketball import OUTDOOR_SAMPLE_COURT
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -440,7 +442,31 @@ def public_game(game):
 
 @app.get("/api/games")
 def games():
-    return {"items": [public_game(g) for g in all_records("game")]}
+    return {
+        "items": [
+            public_game(g)
+            for g in all_records("game")
+            if not g.get("removed_from_library")
+        ]
+    }
+
+
+@app.delete("/api/games/{game_id}")
+def remove_game(game_id: str):
+    with LOCK:
+        game = get("game", game_id)
+        game["removed_from_library"] = True
+        put("game", game_id, game)
+    return {"game_id": game_id, "removed": True}
+
+
+@app.post("/api/games/{game_id}/restore")
+def restore_game(game_id: str):
+    with LOCK:
+        game = get("game", game_id)
+        game.pop("removed_from_library", None)
+        put("game", game_id, game)
+    return public_game(game)
 
 
 def ingested_game(game, auto_analyze):
@@ -571,7 +597,7 @@ class Cut(BaseModel):
 
 class Analysis(BaseModel):
     basketball: bool = True
-    ball_stride: int = Field(default=2, ge=1, le=5)
+    ball_stride: int = Field(default=3, ge=1, le=5)
     device: Optional[str] = Field(default=None, min_length=1, max_length=20)
     candidate_ranges: list[Cut] = Field(default_factory=list, max_length=10)
     replay_paced: bool = False
@@ -856,6 +882,8 @@ def profiles():
     return {"items": []}
 
 
+app.include_router(mail_preview_router)
+app.include_router(naive_router)
 app.include_router(highlight_router)
 app.include_router(basketball_router)
 app.include_router(shot_router)

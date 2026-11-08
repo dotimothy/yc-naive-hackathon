@@ -164,16 +164,16 @@ function ShotSegmentsInner({ gameId, jobId, jobStatus, analysisActive, refreshKe
               : included(shot) ? 'Included provisionally · review suggested' : 'Needs review · excluded from automatic highlights'}</p>
             {!!shot.reasons?.length && <p className="fineprint">{shot.reasons.map(reason => reason.replaceAll('_', ' ')).join(' · ')}</p>}
             <div className="hl-cand-actions">
-              <button className="secondary small" onClick={() => onSeek(shot.start_ms)}>View source</button>
-              {exports[shot.shot_id] ? <a href={exports[shot.shot_id].uri} target="_blank" rel="noreferrer">Open shot clip ↗</a>
-                : <button className="secondary small" disabled={!usable || busy !== null} onClick={() => void createClip(shot)}>{busy === shot.shot_id && operation === 'export' ? 'Creating clip…' : 'Create shot clip'}</button>}
-              <button className="small" disabled={!usable || busy !== null || shot.review_status === 'confirmed_gameplay'} onClick={() => void review(shot, 'gameplay')}>{busy === shot.shot_id && operation === 'review' ? 'Saving…' : 'Confirm gameplay'}</button>
-              <button className="ghost small danger" disabled={!usable || busy !== null || shot.review_status === 'confirmed_non_gameplay'} onClick={() => void review(shot, 'non_gameplay')}>Exclude shot</button>
-              <button className="ghost small" disabled={!usable || busy !== null || shot.review_status === 'pending'} onClick={() => void review(shot, 'pending')}>Reset review</button>
+              <button className="secondary small" onClick={() => onSeek(shot.start_ms)}>View Source</button>
+              {exports[shot.shot_id] ? <a href={exports[shot.shot_id].uri} target="_blank" rel="noreferrer">Open Shot Clip ↗</a>
+                : <button className="secondary small" disabled={!usable || busy !== null} onClick={() => void createClip(shot)}>{busy === shot.shot_id && operation === 'export' ? 'Creating Clip…' : 'Create Shot Clip'}</button>}
+              <button className="small" disabled={!usable || busy !== null || shot.review_status === 'confirmed_gameplay'} onClick={() => void review(shot, 'gameplay')}>{busy === shot.shot_id && operation === 'review' ? 'Saving…' : 'Confirm Gameplay'}</button>
+              <button className="ghost small danger" disabled={!usable || busy !== null || shot.review_status === 'confirmed_non_gameplay'} onClick={() => void review(shot, 'non_gameplay')}>Exclude Shot</button>
+              <button className="ghost small" disabled={!usable || busy !== null || shot.review_status === 'pending'} onClick={() => void review(shot, 'pending')}>Reset Review</button>
             </div>
           </li>)}
         </ol>
-        {shots.length > limit && <button className="secondary small" onClick={() => setLimit(n => n + PAGE_SIZE)}>Show more shots ({shots.length - limit} remaining)</button>}
+        {shots.length > limit && <button className="secondary small" onClick={() => setLimit(n => n + PAGE_SIZE)}>Show More Shots ({shots.length - limit} Remaining)</button>}
       </>}
   </section>;
 }

@@ -340,8 +340,8 @@ export function FilmPlayer({ game, videoRef, playheadMs, index, showBoxes, showP
           </span>
         </div>
         {videoError && <div className="stage-error">{videoError}</div>}
-        <button type="button" className="stage-fullscreen" onClick={toggleFullscreen} aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen with annotations'} title={isFullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen with annotations'}>
-          {isFullscreen ? '✕ Exit fullscreen' : '⛶ Fullscreen'}
+        <button type="button" className="stage-fullscreen" onClick={toggleFullscreen} aria-label={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen with Annotations'} title={isFullscreen ? 'Exit Fullscreen (Esc)' : 'Fullscreen with Annotations'}>
+          {isFullscreen ? '✕ Exit Fullscreen' : '⛶ Fullscreen'}
         </button>
       </div>
       </div>

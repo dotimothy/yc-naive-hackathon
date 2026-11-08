@@ -29,8 +29,8 @@ type Workflow = {
   members?: Member[];
 };
 type Budget = { monthly_cap_micro_usd?: number; per_video_cap_micro_usd?: number; accounted_micro_usd?: number };
-type CrewMember = { name?: string; role?: string; id?: string };
-type Policy = { enabled?: boolean; platform?: string; visibility?: string; stop_at?: string | number };
+type CrewMember = { name?: string; role?: string; id?: string; session_count?: number };
+type Policy = { paused_until?: string; paused_reason?: string; enabled?: boolean; platform?: string; visibility?: string; stop_at?: string | number };
 type Pipeline = {
   updated_at?: string | number; batch: Batch | null; workflows: Workflow[]; budget: Budget | null;
   services: Record<string, string>; crew: CrewMember[]; policy: Policy | null;
@@ -74,12 +74,12 @@ function usePipeline(active: boolean) {
   const timer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
-    if (!active) return;
     let cancelled = false;
+    let inFlight = false;
     let ctrl: AbortController | null = null;
     const tick = async () => {
-      if (cancelled) return;
-      if (document.hidden) { timer.current = window.setTimeout(tick, POLL_MS); return; }
+      if (cancelled || inFlight) return;
+      inFlight = true;
       ctrl = new AbortController();
       const t = window.setTimeout(() => ctrl?.abort(), TIMEOUT_MS);
       setPolling(true);
@@ -96,7 +96,8 @@ function usePipeline(active: boolean) {
         setError(msg); setFailures((n) => n + 1); // keep the last good snapshot
       } finally {
         window.clearTimeout(t);
-        if (!cancelled) { setPolling(false); timer.current = window.setTimeout(tick, POLL_MS); }
+        inFlight = false;
+        if (!cancelled) { setPolling(false); timer.current = window.setTimeout(tick, document.hidden ? 15000 : POLL_MS); }
       }
     };
     void tick();
@@ -106,7 +107,6 @@ function usePipeline(active: boolean) {
   }, [active]);
 
   useEffect(() => {
-    if (!active) return;
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, [active]);
@@ -161,48 +161,20 @@ function SafeLink({ href, children, className }: { href: string | undefined; chi
   return safeHref(href) ? <a className={className} href={href} target="_blank" rel="noreferrer noopener">{children}</a> : <code title="Not a browser URL">{href}</code>;
 }
 
-// ---------- the five-step flow ----------
-/* What each step actually is in this integration (integrations/naive/src/overnight.ts):
-   discovery → raw_clipping → analysis → crew → final_clipping → posting → posted.
-   Local work (queue, PlayLattice API, CV workers, renderer, publisher) is kept apart from the
-   Naive crew agents. Agent chips are shown only when the endpoint's crew list names that agent. */
-type FlowStep = {
-  key: string; icon: string; label: string; raw: string[];
-  input: string; output: string; local: string; agents: string[]; agentsDo?: string; note?: string;
-};
-const FLOW: FlowStep[] = [
-  { key: 'discover', icon: '⌕', label: 'Discover Videos', raw: ['discovery'],
-    input: 'Cached list of trimmed, authorized Drive clips', output: 'Integrity-checked source MP4',
-    local: 'Overnight queue checks size & SHA-256', agents: [],
-    note: 'No live search or VLM discovery runs in this batch — it starts from the cached clip list.' },
-  { key: 'select', icon: '✂', label: 'Select Raw Clips', raw: ['raw_clipping'],
-    input: 'Checked source MP4', output: 'Film-room game record',
-    local: 'PlayLattice API imports the clip (skipped if already imported)', agents: [] },
-  { key: 'analyze', icon: '◎', label: 'Analyze Play', raw: ['analysis', 'crew'],
-    input: 'Game record', output: 'Player tracks + crew clip package',
-    local: 'CV workers: player detection, pose & tracking', agents: ['scout', 'clipper', 'caption-editor', 'channel-manager', 'analyst'],
-    agentsDo: 'Crew picks source-bound clips & captions (CEO coordinates)' },
-  { key: 'quiz', icon: '▯', label: 'Create Portrait Quizzes', raw: ['final_clipping'],
-    input: 'Crew clip package', output: 'Portrait quiz preview',
-    local: 'Portrait renderer builds the vertical replay', agents: ['clipper'], agentsDo: 'Clipper chooses quiz moments & music' },
-  { key: 'post', icon: '↑', label: 'Post To TikTok', raw: ['posting', 'posted'],
-    input: 'Preview + caption package', output: 'TikTok post link',
-    local: 'Local publisher posts via the Naive social provider', agents: ['channel-manager'], agentsDo: 'Channel-manager owns the hand-off' },
+// ---------- stages reported by the actual queue ----------
+const FLOW = [
+  { key: 'discover', label: 'Check Source', raw: ['discovery'], owner: 'Local Queue', description: 'Validate the authorized clip, file size, and source hash.' },
+  { key: 'select', label: 'Import Video', raw: ['raw_clipping'], owner: 'PlayLattice', description: 'Register the source video in the film room.' },
+  { key: 'analyze', label: 'Analyze Video', raw: ['analysis'], owner: 'CV Workers', description: 'Detect players, track movement, and identify ball and hoop evidence.' },
+  { key: 'crew', label: 'Crew Review', raw: ['crew'], owner: 'Naive Team', description: 'Coordinate source checks, clip selection, captions, and package review.' },
+  { key: 'quiz', label: 'Render Portrait Quiz', raw: ['final_clipping'], owner: 'Local Renderer', description: 'Create the portrait replay using the selected quiz and music.' },
+  { key: 'post', label: 'Publish To TikTok', raw: ['posting'], owner: 'Naive Social Provider', description: 'Submit the prepared post and wait for a receipt.' },
+  { key: 'posted', label: 'Posted', raw: ['posted'], owner: 'TikTok', description: 'A successful publication receipt was recorded.' },
 ];
-const SUBSTEP: Record<string, string> = { analysis: 'local CV', crew: 'Naive crew', posted: 'posted', posting: 'posting' };
-
-/** Position of a reported stage string on the five-step flow; null if unrecognised. */
 function stageIndex(stage: string | undefined): number | null {
-  const s = (stage ?? '').toLowerCase();
-  if (!s) return null;
-  const exact = FLOW.findIndex((f) => f.raw.includes(s));
-  if (exact >= 0) return exact;
-  if (/(post|publish|tiktok|upload)/.test(s)) return 4;
-  if (/(quiz|portrait|present|render|final_clip|final clip)/.test(s)) return 3;
-  if (/(analy|track|workflow|crew|curat)/.test(s)) return 2;
-  if (/(raw|clip|download|import|ingest|fetch)/.test(s)) return 1;
-  if (/(discover|search|found|candidate)/.test(s)) return 0;
-  return null;
+  const value=(stage ?? '').toLowerCase();
+  const exact=FLOW.findIndex(f => f.raw.includes(value));
+  return exact >= 0 ? exact : null;
 }
 
 // ---------- batch progress buckets ----------
@@ -240,7 +212,7 @@ function postingState(p: Pipeline, now: number) {
   const b = p.batch; const pol = p.policy;
   const policyEnded = pol?.stop_at !== undefined && (toMs(pol.stop_at) ?? Infinity) <= now;
   const notes: string[] = [];
-  if (pol?.enabled === false) notes.push(policyEnded ? `Auto-publish is off: the authorized posting window ended ${clock(toMs(pol.stop_at))}.` : 'Auto-publish policy is turned off, so nothing new is sent to TikTok.');
+  if (pol?.enabled === false) notes.push(pol.paused_reason ? `${pol.paused_reason}${pol.paused_until ? ` · Review after ${clock(toMs(pol.paused_until))}` : ''}` : policyEnded ? `Auto-publish is off: the authorized posting window ended ${clock(toMs(pol.stop_at))}.` : 'Auto-publish policy is turned off, so nothing new is sent to TikTok.');
   if (b?.status === 'cancelled') return {tone:'idle' as Tone,pill:'Cancelled',headline:'Batch cancelled',body:'Queued work stopped. Completed results and existing posts are preserved.',notes};
   if (b?.status === 'provider_blocked') {
     return { tone: 'bad' as Tone, pill: 'Blocked', headline: 'Posting is blocked by the social provider',
@@ -396,7 +368,7 @@ export function NaiveDashboard({ active }: { active: boolean }) {
             <div className="naive-pill" role="status" aria-live="polite" title="Whether this dashboard is receiving snapshots. It does not mean the workflow is healthy.">
               <span className={`naive-dot ${conn}`} aria-hidden="true" />
               <span><span className="naive-pill-k">Data feed</span><b>{CONN_LABEL[conn]}</b></span>
-              <span className="muted small">{polling ? 'polling…' : `every ${POLL_MS / 1000}s`}</span>
+              <span className="muted small">{polling ? 'polling…' : `auto · ${POLL_MS / 1000}s`}</span>
             </div>
             {posting && (
               <div className={`naive-pill posting ${posting.tone}`} title="Whether new TikTok posts can go out, from batch status and publishing policy.">
@@ -410,7 +382,7 @@ export function NaiveDashboard({ active }: { active: boolean }) {
           <button className="secondary small" onClick={clearWarnings} disabled={warningsDismissed}>Clear Warnings</button>
           {warningsDismissed && <button className="ghost small" onClick={() => {setDismissed('');try{localStorage.removeItem('playlattice-dismissed-warnings');}catch{}}}>Show Warnings</button>}
           <button className="ghost small danger" disabled={controlBusy || !data?.batch?.id || data.batch.status === 'cancelled' || !!controlMessage?.startsWith('Batch cancelled')} onClick={() => void cancelBatch()}>{controlBusy ? 'Cancelling…' : data?.batch?.status === 'cancelled' ? 'Batch Cancelled' : 'Cancel Batch'}</button>
-          <span className="muted small">Clearing warnings hides current banners on this browser. Error history stays available below.</span>
+          <span className="muted small">Warnings clear on this browser; history is kept.</span>
         </div>
         {controlMessage && <p role="status">{controlMessage}</p>}
         <p className="naive-feednote small muted">
@@ -425,24 +397,27 @@ export function NaiveDashboard({ active }: { active: boolean }) {
               : `Pipeline endpoint unavailable: ${error}. Retrying every ${POLL_MS / 1000}s. Start the Naive integration on 127.0.0.1:8011 to see live data.`}
           </div>
         )}
+        {data && posting && !warningsDismissed && <StatusBanner data={data} posting={posting} focus={focus} setFocus={setFocus} stale={conn !== 'live'} />}
       </section>
 
       {!data || !posting ? (
         <section className="panel"><p className="muted small">{conn === 'connecting' ? 'Waiting for the first pipeline snapshot…' : 'No pipeline data received yet. Nothing is shown until the endpoint reports it.'}</p></section>
       ) : (
         <div className={conn === 'live' ? 'naive-body' : 'naive-body dim'}>
-          {!warningsDismissed && <StatusBanner data={data} posting={posting} focus={focus} setFocus={setFocus} stale={conn !== 'live'} />}
-          <Flow data={data} focus={focus} setFocus={setFocus} blocked={postingBlocked} />
+          <details className="panel naive-more naive-flow-details">
+            <summary><h3>Workflow Stages</h3><span className="muted small">View stage counts and filter videos</span></summary>
+            <Flow data={data} focus={focus} setFocus={setFocus} blocked={postingBlocked} />
+          </details>
           <div className="naive-grid">
             <NowPanel data={data} blocked={postingBlocked} />
             <PostsPanel data={data} now={now} />
           </div>
           <TeamActivityPanel activity={data.team_activity} videoName={videoName} now={now} feedLive={conn === 'live'} />
           <BatchTable batch={batchView} focus={focus} setFocus={setFocus} onDelete={deleteEntry} deleting={deleteBusy} />
-          <div className="naive-grid secondary">
-            <CrewRoles crew={data.crew} workflows={data.workflows} />
-            <BudgetPanel budget={data.budget} workflows={data.workflows} />
-          </div>
+          <details className="panel naive-more">
+            <summary><h3>Crew & Budget</h3><span className="muted small">Roles, usage, and spending limits</span></summary>
+            <div className="naive-grid secondary"><CrewRoles crew={data.crew} workflows={data.workflows} /><BudgetPanel budget={data.budget} workflows={data.workflows} /></div>
+          </details>
           <details className="panel naive-more">
             <summary><h3>Crew workflow history</h3><span className="muted small">all batches · {plural(data.workflows.length, 'job')} · filters, costs, publication errors</span></summary>
             <WorkflowTable workflows={data.workflows} crew={data.crew} now={now} />
@@ -475,7 +450,7 @@ function StatusBanner({ data, posting, focus, setFocus, stale }: {
           {waiting.filter((w) => w.error).slice(0, 1).map((w) => (
             <p key={w.id} className="naive-banner-quote">Latest note on <b>{w.name || w.id}</b>: “{w.error}”</p>
           ))}
-          <p className="muted small">This dashboard is read-only and cannot resume posting.</p>
+
         </div>
       </div>
       {b && prog && (
@@ -508,75 +483,33 @@ function StatusBanner({ data, posting, focus, setFocus, stale }: {
   );
 }
 
-function Flow({ data, focus, setFocus, blocked }: { data: Pipeline; focus: Focus; setFocus: (f: Focus) => void; blocked: boolean }) {
+function Flow({ data, focus, setFocus }: { data: Pipeline; focus: Focus; setFocus: (f: Focus) => void; blocked: boolean }) {
   const items = data.batch?.items ?? [];
-  const crewNames = new Set(data.crew.map((c) => (c.name ?? c.role ?? '').toLowerCase()));
-  const steps = FLOW.map((f, i) => {
-    const here = items.filter((it) => stageIndex(it.stage) === i);
-    const by = new Map<string, number>();
-    for (const it of here) by.set(it.status ?? 'unknown', (by.get(it.status ?? 'unknown') ?? 0) + 1);
-    const subs = new Map<string, number>();
-    if (f.raw.length > 1) for (const it of here) if (it.stage) subs.set(it.stage, (subs.get(it.stage) ?? 0) + 1);
-    const past = items.filter((it) => { const k = stageIndex(it.stage); return k !== null && k > i; }).length;
-    const running = here.filter((it) => it.status === 'running').length;
-    return { f, i, here: here.length, by, subs, past, running };
-  });
-  const unmapped = items.filter((it) => stageIndex(it.stage) === null).length;
-  const blockedAt = blocked ? 4 : null;
+  const cancelled = data.batch?.status === 'cancelled';
+  const liveRuns = data.team_activity?.runs.filter(r => r.current) ?? [];
+  const unmapped = items.filter(it => stageIndex(it.stage) === null).length;
   return (
     <section className="panel naive-flow-panel" aria-labelledby="naive-flow-h">
-      <div className="panel-head">
-        <div>
-          <h3 id="naive-flow-h">How a video moves through the crew</h3>
-          <p className="muted small">Numbers are this batch’s videos at the step they were last reported at. Click a step to list its videos.</p>
-        </div>
-        {focus.stage !== null && <button type="button" className="ghost small" onClick={() => setFocus({ ...focus, stage: null })}>Show All Steps</button>}
-      </div>
-      <div className="naive-key small" aria-hidden="true">
-        <span><i className="tag local">Local</i> PlayLattice code on this machine</span>
-        <span><i className="tag agent">Naive</i> Naive crew agents</span>
-      </div>
-      <ol className="naive-flow">
-        {steps.map(({ f, i, here, by, subs, past, running }) => {
-          const on = focus.stage === i;
-          const paused = data.batch?.status === 'provider_blocked';
-          const state = blockedAt === i ? 'blocked' : running > 0 && !paused ? 'active' : here > 0 ? 'holding' : 'idle';
-          const agents = f.agents.filter((a) => crewNames.has(a));
-          const stateLabel = state === 'blocked' ? 'Blocked' : paused && running > 0 ? `${running} waiting` : state === 'active' ? `${running} in progress` : null;
-          return (
-            <li key={f.key} className={`naive-step ${state}${on ? ' on' : ''}`}>
-              <button type="button" aria-pressed={on} onClick={() => setFocus({ ...focus, stage: on ? null : i })}
-                aria-label={`Step ${i + 1}, ${f.label}: ${here} video${here === 1 ? '' : 's'} here${stateLabel ? `, ${stateLabel}` : ''}. ${on ? 'Selected; press to show all.' : 'Press to list these videos.'}`}>
-                <span className="naive-step-top">
-                  <span className="naive-step-icon" aria-hidden="true">{f.icon}</span>
-                  <span className="naive-step-n">Step {i + 1}</span>
-                  {stateLabel && <span className={`naive-step-flag ${state}`}>{stateLabel}</span>}
-                </span>
-                <span className="naive-step-title">{f.label}</span>
-                <span className="naive-step-io"><em>In</em>{f.input}</span>
-                <span className="naive-step-io"><em>Out</em>{f.output}</span>
-                <span className="naive-step-who"><i className="tag local">Local</i>{f.local}</span>
-                {agents.length > 0 && <span className="naive-step-who"><i className="tag agent">Naive</i>{f.agentsDo}: {agents.join(', ')}</span>}
-                {f.note && <span className="naive-step-note">{f.note}</span>}
-                <span className="naive-step-count">
-                  <b>{here}</b><span>here now</span>
-                  {past > 0 && <span className="muted"> · {past} moved on</span>}
-                </span>
-                {here > 0 && (
-                  <span className="naive-step-by">
-                    {[...by].sort((a, b) => b[1] - a[1]).map(([s, n]) => <span key={s} className={`status ${statusClass(s)}`}>{n} {words(s)}</span>)}
-                  </span>
-                )}
-                {subs.size > 1 || (subs.size === 1 && f.raw.length > 1) ? (
-                  <span className="naive-step-sub muted">{[...subs].map(([s, n]) => `${n} at ${SUBSTEP[s] ?? words(s)}`).join(' · ')}</span>
-                ) : null}
-              </button>
-              {i < FLOW.length - 1 && <span className="naive-arrow" aria-hidden="true">→</span>}
-            </li>
-          );
-        })}
-      </ol>
-      {unmapped > 0 && <p className="muted small">{plural(unmapped, 'video')} reported a stage this view does not recognise; see the list below.</p>}
+      <div className="panel-head"><div>
+        <h3 id="naive-flow-h">Workflow Stages</h3>
+        <p className="muted small">Batch: {data.batch?.id ?? 'None'} · {cancelled ? 'Cancelled — counts show where videos last stopped.' : 'Counts show each video’s last recorded stage.'} Click a stage to filter the video list.</p>
+      </div>{focus.stage !== null && <button className="ghost small" onClick={() => setFocus({...focus,stage:null})}>Show All Steps</button>}</div>
+      <div className="naive-table-wrap"><table className="player-table naive-stage-table">
+        <thead><tr><th scope="col">Step</th><th scope="col">Owner / Work</th><th scope="col">Recorded Videos</th><th scope="col">Outcomes</th></tr></thead>
+        <tbody>{FLOW.map((step,index) => {
+          const here=items.filter(it => stageIndex(it.stage) === index);
+          const counts=new Map<string,number>();
+          for (const it of here) counts.set(it.status ?? 'unknown',(counts.get(it.status ?? 'unknown') ?? 0)+1);
+          return <tr key={step.key} className={focus.stage === index ? 'on' : undefined}>
+            <th scope="row"><button className="ghost small" aria-pressed={focus.stage === index} onClick={() => setFocus({...focus,stage:focus.stage === index ? null : index})}>{index+1}. {step.label}</button></th>
+            <td><strong>{step.owner}</strong><span className="muted small naive-role">{step.description}</span></td>
+            <td>{here.length}</td>
+            <td>{counts.size ? [...counts].map(([status,count]) => <span key={status} className={`status ${statusClass(status)}`}>{count} {words(status)}</span>) : <span className="muted">None Recorded</span>}</td>
+          </tr>;
+        })}</tbody>
+      </table></div>
+      <p className="small"><b>Live Crew Activity:</b> {liveRuns.length ? `${liveRuns.length} active run${liveRuns.length === 1 ? '' : 's'}${liveRuns.some(r => r.cancellation_requested) ? ' (includes stopping runs)' : ''}. See Crew Activity for tasks and handoffs.` : 'No active runs reported.'} {data.policy?.enabled === false && 'Automatic posting is off.'}</p>
+      {unmapped > 0 && <p className="muted small">{unmapped} videos have no recognized stage. They remain in the video list.</p>}
     </section>
   );
 }
@@ -608,7 +541,7 @@ function NowPanel({ data, blocked }: { data: Pipeline; blocked: boolean }) {
           <p className="naive-now-name"><SafeLink href={cur.source_url}>{cur.name || cur.id}</SafeLink> <Status value={data.batch?.status === 'provider_blocked' ? 'waiting' : cur.status} /></p>
           <p className="naive-now-stage">
             <StepPips stage={cur.stage} />
-            <span>{idx !== null ? <>Step {idx + 1} of 5 · <b>{FLOW[idx].label}</b></> : 'Stage not recognised'} <span className="muted">({words(cur.stage)})</span></span>
+            <span>{idx !== null ? <>Step {idx + 1} of {FLOW.length} · <b>{FLOW[idx].label}</b></> : 'Stage not recognised'} <span className="muted">({words(cur.stage)})</span></span>
           </p>
           {cur.error && <p className={blocked ? 'naive-now-err bad' : 'naive-now-err'}>{cur.error}</p>}
           <p className="naive-now-links small">
@@ -752,6 +685,7 @@ const ROLE_INFO: Record<string, { what: string; step: string }> = {
   'caption-editor': { what: 'Writes hedged captions (identities stay unverified)', step: 'Analyze Play' },
   'channel-manager': { what: 'Owns the publication hand-off to the local publisher', step: 'Post To TikTok' },
   analyst: { what: 'Feedback review of the package', step: 'Analyze Play' },
+  outreach: { what: 'Inbound AgentMail conversations, catalog recommendations, and clip-request clarification', step: 'Customer Email' },
 };
 
 function CrewRoles({ crew, workflows }: { crew: CrewMember[]; workflows: Workflow[] }) {
@@ -765,7 +699,7 @@ function CrewRoles({ crew, workflows }: { crew: CrewMember[]; workflows: Workflo
           {crew.map((c, i) => {
             const key = (c.name ?? c.role ?? '').toLowerCase();
             const info = ROLE_INFO[key];
-            const n = c.id ? sessions.get(c.id) : undefined;
+            const n = typeof c.session_count === 'number' ? c.session_count : c.id ? sessions.get(c.id) : undefined;
             return (
               <li key={c.id ?? i}>
                 <i className="tag agent" aria-hidden="true">Naive</i>

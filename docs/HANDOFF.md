@@ -78,6 +78,10 @@ Tabs remain mounted so review drafts and the source playhead survive navigation.
 | Frontend | `frontend/src/main.tsx`, `SectionTabs.tsx`, `FilmPlayer.tsx`, `HighlightsPanel.tsx`, `PlayerHighlightsTable.tsx`, `PlayerStatsCard.tsx` | Film-room tabs, synchronized replay, tables, candidate review and evidence |
 | Other panels | `LiveBoard.tsx`, `ShotSegmentsPanel.tsx`, `BasketballPanel.tsx`, `useGameRoom.ts` in `frontend/src/` | Summary, shot review, object evidence and live job state |
 
+The inbound email branch uses AgentMail → a durable local intake ledger → Naive’s `outreach` specialist → deterministic mailroom validation → source clipping and media QA → an expiring preview link and AgentMail reply. Outreach is a CEO team member, separate from the five video-analysis specialists. Its structured output selects catalog IDs and source times; local code owns source access, rendering, recipient selection, and delivery. AgentMail credentials stay in the local worker. See `integrations/agentmail/README.md` for activation and `docs/html/architecture.html` for the system map. Email does not change the social publishing policy.
+
+Daily discovery runs independently with a five-video daily target and alternates quiz and captioned storytelling exports; see `docs/DAILY_AUTONOMOUS_VIDEO.md`. Root setup and startup commands are `./setup.sh` and `./run.sh`.
+
 All time ranges are milliseconds on the original source. Decoder PTS is preferred, with an explicit CFR fallback. Camera shots use half-open ranges; downstream tracking continuity and highlight ranges must respect those boundaries.
 
 Default local state is in `data/local/scoutfilm.sqlite3`, with job artifacts under `data/local/processed/<job_id>/`. Worker diagnostics are in `worker.log`; completed jobs have `report.json`, tracks and rendered clips. Only registered media artifacts are served. `SCOUTFILM_DATA` selects another local data directory.
@@ -97,7 +101,7 @@ The linked [Naive SDK handoff tab](https://docs.google.com/document/d/1kEtq_jr14
 | Highlights/clips | `GET /api/games/{game_id}/highlights`, `GET /api/games/{game_id}/clips` | Candidate/review/stats bundle and `{items:[...]}` clip list; media through `/api/media/{id}` |
 | Updates/audit | `GET /api/games/{game_id}/stream`, `GET /api/jobs/{job_id}/audit` | Persisted SSE with sequence IDs/reconnect support and `{items:[...]}` audit entries |
 
-Actual analysis defaults: `basketball:true`, `ball_stride:2` (1–5), `stride:5` (1–20), `confidence:0.25` (0.1–0.99), `device:null` (auto policy), `replay_paced:false`, `candidate_ranges:[]` (at most 10 source-bounded ranges). A caller does not provide `job_id` or arbitrary `output_dir` through this HTTP request. The server allocates IDs and owns paths. Generic source-URL/stream ingress, requested-output schemas, world court coordinates, verified rosters and annotated-preview exports are not part of this route. The old separate `POST .../basketball` returns 410; use the shared analysis route.
+Actual analysis defaults: `basketball:true`, `ball_stride:3` (1–5), `stride:5` (1–20), `confidence:0.25` (0.1–0.99), `device:null` (auto policy), `replay_paced:false`, `candidate_ranges:[]` (at most 10 source-bounded ranges). A caller does not provide `job_id` or arbitrary `output_dir` through this HTTP request. The server allocates IDs and owns paths. Generic source-URL/stream ingress, requested-output schemas, world court coordinates, verified rosters and annotated-preview exports are not part of this route. The old separate `POST .../basketball` returns 410; use the shared analysis route.
 
 ```sh
 # Use the game_id returned by the upload; choose a fresh key for a new analysis.

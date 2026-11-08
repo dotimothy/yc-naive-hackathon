@@ -427,7 +427,14 @@ def draw_frame(
     d.rounded_rectangle(
         (16, panel_y, 660, 1212), radius=20, fill="#101b29", outline="#293c52", width=2
     )
-    if quiz and freeze:
+    if segment.get("story_beats"):
+        from workers.render.story import story_beat
+
+        beat = story_beat(segment, timestamp)
+        text(d, (34, 800), beat["title"], 22, color="#ff9758", bold=True)
+        text(d, (34, 853), beat["headline"], 36, bold=True, width=30)
+        text(d, (34, 990), beat["caption"], 25, color="#bfd0e1", width=42)
+    elif quiz and freeze:
         text(d, (34, 792), "WHAT HAPPENS NEXT?", 29, color="#ff9758", bold=True)
         short_question = (
             "Which Way Will This Player Shift?"
@@ -691,8 +698,19 @@ def render_portrait(
             cursor += duration
     audio_receipt = add_audio(source, output, audio_parts, music, music_cues)
     result = dict(
-        profile=PROFILE,
-        presentation_style="broadcast-quiz-v2",
+        profile=plan.get("profile", PROFILE),
+        presentation_style=plan.get("presentation_style", "broadcast-quiz-v2"),
+        stories=[
+            dict(
+                track_id=s["track_id"],
+                source_start_ms=s["source_start_ms"],
+                source_end_ms=s["source_end_ms"],
+                beats=s["story_beats"],
+                evidence=s["story_evidence"],
+            )
+            for s in plan["segments"]
+            if s.get("story_beats")
+        ],
         width=WIDTH,
         height=HEIGHT,
         fps=FPS,

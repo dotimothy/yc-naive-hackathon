@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 
 /* Per-agent crew activity from /pipeline `team_activity`. Every field comes from Naive session
    records (status, stop reason, events). Nothing is inferred beyond what those records show:
@@ -12,7 +12,7 @@ type Agent = {
   tool_calls: number; tool_errors: number; open_tool: string | null; output: string | null; errors: Entry[];
   cost_micro_usd: number | null; pending_actions: string[]; history_truncated: boolean; catching_up: boolean; timeline: Entry[];
 };
-type Run = { job_id: string; game_id: string | null; workflow_state: string; current: boolean; root_session_id: string | null; created_ms: number | null; completed_at: string | null; agents: Agent[] };
+type Run = { job_id: string; game_id: string | null; workflow_state: string; current: boolean; cancellation_requested?: boolean; root_session_id: string | null; created_ms: number | null; completed_at: string | null; agents: Agent[] };
 export type TeamActivity = { fetched_at: string | null; error: string | null; runs: Run[]; limits?: Record<string, number> };
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -25,9 +25,12 @@ export function normalizeActivity(v: unknown): TeamActivity | null {
   return { fetched_at: typeof v.fetched_at === 'string' ? v.fetched_at : null, error: typeof v.error === 'string' ? v.error : null, runs, limits: isObj(v.limits) ? (v.limits as Record<string, number>) : undefined };
 }
 
+const CREW_ORDER = ['CEO', 'scout', 'clipper', 'caption-editor', 'analyst', 'channel-manager'];
+const DISPLAY_NAME: Record<string, string> = { CEO: 'Coordinator', scout: 'Scout', clipper: 'Clipper', 'caption-editor': 'Caption Editor', analyst: 'Analyst', 'channel-manager': 'Channel Manager' };
+
 const ROLE: Record<string, string> = {
   CEO: 'Coordinator', scout: 'Source check', clipper: 'Clip selection', 'caption-editor': 'Captions',
-  'channel-manager': 'Publication hand-off', analyst: 'Package review',
+  'channel-manager': 'Publication hand-off', analyst: 'Package review', outreach: 'Customer Email',
 };
 const STATE_TONE: Record<string, string> = {
   working: 'running', waiting_agent: 'wait', waiting_provider: 'wait', waiting_input: 'wait', queued: 'queued', paused: 'wait',
@@ -59,8 +62,8 @@ export function TeamActivityPanel({ activity, videoName, now, feedLive }: {
     <section className="panel naive-team" aria-labelledby="naive-team-h">
       <div className="panel-head">
         <div>
-          <h3 id="naive-team-h">Crew activity</h3>
-          <p className="muted small">What each Naive agent is doing, from its session records and event log. Agent reasoning is not exposed by Naive and is not shown.</p>
+          <h3 id="naive-team-h">Crew Activity</h3>
+          <p className="muted small">Live session status, actions, and handoffs. Expand an agent for details.</p>
         </div>
         <span className={`naive-team-fresh ${stale ? 'stale' : ''}`} title={full(activity?.fetched_at)}>
           {activity === null ? 'activity feed unavailable' : activity.fetched_at ? `Naive sessions checked ${ago(activity.fetched_at, now)}` : 'not fetched yet'}
@@ -78,7 +81,7 @@ export function TeamActivityPanel({ activity, videoName, now, feedLive }: {
             <div className="naive-team-runs" role="group" aria-label="Crew run">
               {runs.map((r) => (
                 <button key={r.job_id} type="button" className={r === run ? 'secondary small on' : 'ghost small'} aria-pressed={r === run} onClick={() => setPick(r.job_id)}>
-                  {videoName(r.job_id) ?? `job ${r.job_id.slice(0, 8)}`} · {r.current ? 'active' : 'last finished'}
+                  {videoName(r.job_id) ?? `job ${r.job_id.slice(0, 8)}`} · {r.cancellation_requested ? 'stopping' : r.current ? 'active' : 'history'}
                 </button>
               ))}
             </div>
@@ -91,49 +94,61 @@ export function TeamActivityPanel({ activity, videoName, now, feedLive }: {
 }
 
 function RunView({ run, video, now, dim }: { run: Run; video: string | null; now: number; dim: boolean }) {
+  const agents = [...run.agents].sort((a, b) => {const rank = (name: string) => {const i = CREW_ORDER.indexOf(name);return i < 0 ? CREW_ORDER.length : i;};return rank(a.name) - rank(b.name);});
   return (<>
     <div className={run.current ? 'naive-team-scope' : 'naive-team-scope past'}>
       <b>{video ?? 'Video not in the current batch'}</b>
       <span className="muted small"> · job <code title={run.job_id}>{run.job_id.slice(0, 8)}</code> · workflow {run.workflow_state.replace(/_/g, ' ')}</span>
-      {!run.current && <p className="small">No crew run is active right now. These are the final states of the most recent run{run.completed_at ? `, finished ${ago(run.completed_at, now)}` : ''} — not current work.</p>}
+      {run.cancellation_requested && <p className="small">Cancellation requested. This run is still reporting activity while it stops.</p>}
+      {!run.current && <p className="small">Historical run{run.completed_at ? ` · finished ${ago(run.completed_at, now)}` : ''}. These are recorded states, not current work.</p>}
       {!run.root_session_id && <p className="small muted">This workflow has no Naive session yet, so there is no agent activity to show.</p>}
     </div>
-    <div className={dim ? 'naive-agents dim' : 'naive-agents'}>
-      {run.agents.map((a) => <AgentCard key={a.agent_id} a={a} now={now} current={run.current} />)}
+    <div className={dim ? 'naive-team-table-wrap dim' : 'naive-team-table-wrap'} tabIndex={0} role="region" aria-label="Crew Agent Activity">
+      <table className="player-table naive-team-table">
+        <caption className="naive-team-caption">{run.current ? 'Current Run' : 'Last Finished Run'} · Read top to bottom: coordination, source check, clipping, captions, review, publication.</caption>
+        <thead><tr><th scope="col">Agent</th><th scope="col">Status</th><th scope="col">Assigned Work</th><th scope="col">Latest Activity</th><th scope="col">Details</th></tr></thead>
+        <tbody>{agents.map((a) => <AgentRow key={`${run.job_id}:${a.agent_id}`} a={a} now={now} current={run.current} />)}</tbody>
+      </table>
     </div>
   </>);
 }
 
-function AgentCard({ a, now, current }: { a: Agent; now: number; current: boolean }) {
+function AgentRow({ a, now, current }: { a: Agent; now: number; current: boolean }) {
   const [open, setOpen] = useState(false);
   const tone = STATE_TONE[a.state] ?? 'none';
   const lastUpdate = a.last_event_at ?? a.started_at;
   return (
-    <article className={`naive-agent tone-${tone}`}>
-      <header>
-        <div>
-          <b>{a.name}</b>
-          <span className="muted small"> · {ROLE[a.name] ?? 'role not mapped'}</span>
-        </div>
-        <span className={`status ${tone}`} title={a.status ? `session ${a.status}${a.stop_reason ? ` / ${a.stop_reason}` : ''}` : 'no session'}>
-          {current ? '' : 'final: '}{a.state_label}
-        </span>
-      </header>
+    <Fragment>
+      <tr className={`naive-agent-row tone-${tone}`}>
+        <th scope="row"><strong>{DISPLAY_NAME[a.name] ?? a.name}</strong><span className="muted small naive-role">{ROLE[a.name] ?? 'Role Unknown'}</span></th>
+        <td><span className={`status ${tone}`} title={a.status ? `Session ${a.status}${a.stop_reason ? ` / ${a.stop_reason}` : ''}` : 'No Session'}>{a.state_label}</span>
+          {a.waiting_on.length > 0 && <span className="muted small naive-role">Waiting on {a.waiting_on.join(', ')}</span>}
+          {a.errors.length > 0 && <span className="naive-err-inline naive-role">{a.errors.length} Recent Error{a.errors.length === 1 ? '' : 's'}</span>}
+          {a.pending_actions.length > 0 && <span className="muted small naive-role">Approval Pending</span>}
+        </td>
+        <td><span className="naive-clamp" title={a.task ?? undefined}>{a.task ?? 'No task recorded'}</span></td>
+        <td><span className="naive-clamp" title={a.latest_action?.summary}>{a.latest_action?.summary ?? 'No activity recorded'}</span>
+          <span className="naive-agent-updated naive-role" title={full(lastUpdate)}>Updated {ago(lastUpdate, now)}</span>
+        </td>
+        <td><button type="button" className="ghost small" aria-expanded={open} aria-controls={`agent-details-${a.agent_id}`} onClick={() => setOpen(!open)}>{open ? 'Hide Details' : `View (${a.timeline.length})`}</button></td>
+      </tr>
+      {open && <tr id={`agent-details-${a.agent_id}`} className="naive-agent-detail-row"><td colSpan={5}>
+      <div className="naive-agent-detail">
+      <h4>{DISPLAY_NAME[a.name] ?? a.name} · Session Details</h4>
       <dl>
         <div><dt>Task</dt><dd className="naive-clamp" title={a.task ?? undefined}>{a.task ?? <span className="muted">no task message recorded</span>}</dd></div>
         <div><dt>Session</dt><dd>{a.status ? <>{a.status}{a.stop_reason ? ` · ${a.stop_reason.replace(/_/g, ' ')}` : ''}</> : <span className="muted">none</span>}</dd></div>
         <div><dt>Latest action</dt><dd>{a.latest_action ? <><span>{a.latest_action.summary}</span> <span className="muted small" title={full(a.latest_action.at)}>{ago(a.latest_action.at, now)}</span></> : <span className="muted">unknown</span>}</dd></div>
-        <div><dt>Started · last update</dt><dd><span title={full(a.started_at)}>{time(a.started_at)}</span> · <span title={full(lastUpdate)}>{ago(lastUpdate, now)}</span></dd></div>
+        {open && <div><dt>Started · last update</dt><dd><span title={full(a.started_at)}>{time(a.started_at)}</span> · <span title={full(lastUpdate)}>{ago(lastUpdate, now)}</span></dd></div>}
         <div><dt>Tools</dt><dd>{a.tool_calls} call{a.tool_calls === 1 ? '' : 's'}{a.tool_errors ? <span className="naive-err-inline"> · {a.tool_errors} error{a.tool_errors === 1 ? '' : 's'}</span> : ''}{a.open_tool ? <> · running <code>{a.open_tool}</code></> : ''}</dd></div>
-        <div><dt>Output</dt><dd className="naive-clamp" title={a.output ?? undefined}>{a.output ?? <span className="muted">none yet</span>}</dd></div>
+        {open && <div><dt>Output</dt><dd className="naive-clamp" title={a.output ?? undefined}>{a.output ?? <span className="muted">none yet</span>}</dd></div>}
         {a.pending_actions.length > 0 && <div><dt>Pending</dt><dd>{a.pending_actions.join(', ')}</dd></div>}
-        <div><dt>Cost</dt><dd>{usd(a.cost_micro_usd)}{a.model ? <span className="muted small"> · {a.model}</span> : null}</dd></div>
+        {open && <div><dt>Cost</dt><dd>{usd(a.cost_micro_usd)}{a.model ? <span className="muted small"> · {a.model}</span> : null}</dd></div>}
       </dl>
       {a.errors.length > 0 && <ul className="naive-agent-errors">{a.errors.map((e) => <li key={e.id}>{time(e.at)} {e.summary}{e.detail ? `: ${e.detail}` : ''}</li>)}</ul>}
-      <button type="button" className="ghost small" aria-expanded={open} disabled={a.timeline.length === 0} onClick={() => setOpen(!open)}>
-        {a.timeline.length === 0 ? 'No Activity Recorded' : open ? 'Hide Timeline' : `Show Timeline (${a.timeline.length})`}
-      </button>
-      {open && (
+      {open && (<>
+        <h4>Activity Timeline</h4>
+        {a.timeline.length === 0 && <p className="muted small">No events recorded for this agent.</p>}
         <ol className="naive-timeline">
           {(a.history_truncated || a.catching_up) && <li className="muted small">{a.history_truncated ? 'Older events before this window are not loaded. ' : ''}{a.catching_up ? 'Newer events are still loading.' : ''}</li>}
           {a.timeline.map((e) => (
@@ -147,7 +162,8 @@ function AgentCard({ a, now, current }: { a: Agent; now: number; current: boolea
             </li>
           ))}
         </ol>
-      )}
-    </article>
+      </>)}
+      </div></td></tr>}
+    </Fragment>
   );
 }

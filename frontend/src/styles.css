@@ -523,3 +523,25 @@ button.link.inline { padding: 0; font-size: inherit; }
   .room .board-game h2 { font-size: 1.35rem; }
 }
 .section-tabs button[aria-selected='true']:hover:not(:disabled) { background: var(--accent); color: var(--accent-ink); }
+
+.game-list > li { position: relative; }
+.game-list .game { padding-right: 72px; }
+.library-remove { position: absolute; top: 8px; right: 5px; font-size: 0.72rem; }
+
+/* Keep action labels in title case across dashboard and review controls. */
+:root body .app button,
+:root body .pl-splash button {
+  text-transform: capitalize;
+}
+
+/* Shared sponsor acknowledgement across both workspaces. */
+.sponsor-footer { margin-top: auto; padding: 20px 24px; border-top: 1px solid var(--line-strong); background: var(--panel); display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.sponsor-footer > div { display: grid; gap: 3px; }
+.sponsor-footer strong { font-family: var(--display); font-size: 1.1rem; letter-spacing: 0.05em; }
+.sponsor-footer > div > span { color: #b7c3d3; font-size: 0.85rem; }
+.sponsor-footer nav { display: flex; flex-wrap: wrap; gap: 10px; }
+.sponsor-footer a { display: inline-flex; align-items: center; gap: 16px; padding: 10px 14px; border: 1px solid var(--line-strong); border-radius: var(--radius); color: var(--text); text-decoration: none; font-weight: 600; }
+.sponsor-footer a:hover { border-color: var(--accent); color: var(--accent); }
+.sponsor-footer a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.sponsor-footer a span { color: var(--accent); }
+@media (max-width: 520px) { .sponsor-footer { padding: 18px 16px; } }

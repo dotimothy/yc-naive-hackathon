@@ -27,3 +27,7 @@ export function validateCrew(agents: ReadonlyArray<{
   const absent = crewMembers.filter(agent => !roster.has(agent.id));
   if (absent.length) throw new Error(`CEO roster missing: ${absent.map(a => a.name).join(', ')}`);
 }
+
+/** Customer support is separate from the five required video-analysis specialists. */
+export const supportCrew = [{ id: 'agt_8j90v66p4vfsn7qrsnjzgentem', name: 'outreach' }] as const;
+export const companyCrew = [crew.coordinator, ...crewMembers, ...supportCrew];

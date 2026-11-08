@@ -1,3 +1,4 @@
+import {batchCancelled} from './batch-control.js';
 import { mkdir, readFile, open, unlink } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
@@ -8,11 +9,13 @@ import { WorkflowStore } from './analysis-store.js';
 import { createAnalysisEngine } from './analysis-engine.js';
 import {discoveryRequest} from './discovery-http.js';
 import {pipelineRequest} from './pipeline-http.js';
+import {TeamActivity} from './team-activity.js';
 import {previewRequest} from './preview-http.js';
 const folder=fileURLToPath(new URL('../../../data/naive/',import.meta.url));
 const base=new URL(process.env.PLAYLATTICE_URL||'http://127.0.0.1:8000');
 if(!['127.0.0.1','localhost','[::1]'].includes(base.hostname)||base.protocol!=='http:') throw new Error('Analysis API must be loopback HTTP');
 const client=naiveClient();
+const activity=new TeamActivity(client.sessions);
 async function read(path:string) {const r=await fetch(new URL(path,base),{signal:AbortSignal.timeout(10000)});if(!r.ok)throw Object.assign(new Error(`Local API HTTP ${r.status}`),{status:r.status});return r.json();}
 await mkdir(folder,{recursive:true});
 // OS process lock: a crash leaves a PID that is checked on the next start.
@@ -30,12 +33,14 @@ async function tick(explicitGame?:string) {
  try {
   for(const r of store.all().filter(r=>['submitting','running','cancelling'].includes(r.state)))try{await advance(r);}catch(e){const current=store.get(r.job_id);current.last_error=safeError(e);current.last_checked_at=new Date().toISOString();store.save(current);console.error(JSON.stringify({job_id:r.job_id,...safeError(e)}));}
   if(stop)return;
+  const batch=JSON.parse(await readFile(folder+'overnight-state.json','utf8').catch(()=>'{"items":[]}'));
+  const cancelledJobs=new Set(batchCancelled(folder,batch.id)?batch.items.map((r:any)=>r.job_id):[]);
   const games=await read('/api/games');
   const initial=!store.initialized();
   for(const game of games.items) {
    if(!initial&&explicitGame&&game.game_id!==explicitGame)continue;
    const jobs=await read(`/api/games/${encodeURIComponent(game.game_id)}/jobs`);const job=jobs.items.at(-1);
-   if(!job||job.status!=='succeeded'||store.get(job.job_id))continue;
+   if(!job||cancelledJobs.has(job.job_id)||job.status!=='succeeded'||store.get(job.job_id))continue;
    const month=new Date().toISOString().slice(0,7);
    if(initial&&game.game_id!==explicitGame){store.save({job_id:job.job_id,game_id:game.game_id,state:'baseline_skipped',month,reserved:0});continue;}
    const clips=await read(`/api/games/${encodeURIComponent(game.game_id)}/clips`);
@@ -51,7 +56,7 @@ const server=createServer(async(req,res)=>{
  res.setHeader('Content-Type','application/json');res.setHeader('Cache-Control','no-store');
  try {
   if(await discoveryRequest(req,res,folder))return;
-  if(await pipelineRequest(req,res,store,folder))return;
+  if(await pipelineRequest(req,res,store,folder,activity))return;
   if(await previewRequest(req,res,store,folder+'portrait-exports'))return;
   const url=new URL(req.url||'/','http://127.0.0.1');
   if(req.method==='GET'&&url.pathname==='/health'){res.end(JSON.stringify({status:'ok',busy,publishing:false}));return;}

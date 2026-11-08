@@ -1,0 +1,35 @@
+# PlayLattice project page
+
+Static, self-contained project page. No backend, package installation, or build step required. Assets and CSS use relative paths for GitHub Pages project URLs.
+
+Preview from the repository root:
+
+```sh
+python3 -m http.server 8080 --bind 127.0.0.1 --directory docs/html
+```
+
+Open http://127.0.0.1:8080. This does not start the analysis app.
+
+## Publish later
+
+Nothing is published automatically by adding these files.
+
+**Publish from a branch:** In repository Settings → Pages, choose Deploy from a branch, select the branch containing this page and the `/docs` folder. The page will be at `https://dotimothy.github.io/yc-naive-hackathon/html/` after publication. GitHub's branch-based folder choices are `/` and `/docs`; `/docs/html` is not a selectable publishing root.
+
+**Publish at the site's root:** Use a GitHub Pages Actions workflow that uploads `docs/html` with `actions/upload-pages-artifact`, then deploys it with `actions/deploy-pages`. Set Pages to GitHub Actions first. No deployment workflow is enabled by this change.
+
+## Add the finished demo
+
+Add the finished demo video to the Demo Recording sidebar panel or the Film Room panel in `index.html`. Use a hosted embed or a `<video controls preload="metadata">` element with a relative or public URL. Update the coming-soon labels when ready. Keep large videos and private source footage out of Git.
+
+The page uses the app’s bundled Barlow fonts and broadcast theme. `page.js` handles accessible tabs, motion controls, and a clearly labeled quiz interaction example. Motion honors the system preference; the recorded GIF has a still-image fallback.
+
+The dashboard GIF is the existing recorded app tour, not the upcoming demo or the latest UI. Its underlying footage is TrackID3x3, CC BY 4.0. Attribution is visible on the page; capture and transformation details are in `docs/assets/README.md`. The decorative court is an inline SVG illustration, not model output.
+
+## Architecture page
+
+`architecture.html` presents the current system map, video lifecycle, AgentMail → Naive outreach → validated source-clip preview branch, data/control boundaries, and the distinction between static GitHub Pages hosting and the live Mac app. Open `/architecture.html` on the same preview server.
+
+## TikTok visual fallback
+
+`assets/tiktok-quiz-preview.gif` is an 8 fps, 300 px-wide, silent recording of a previously published portrait quiz (TikTok post 7705723023252376845), not a live embed or the newest shot-quiz format. Source footage: Singpore amatuer basketball channel, https://www.youtube.com/watch?v=zpT8lc2vtkQ (LOW-008). Source credit is displayed beside the preview. The GIF is cropped/rendered quiz output with added graphics; `tiktok-quiz-poster.png` provides a reduced-motion still. The original profile embed remains expandable below it.

@@ -1,3 +1,4 @@
+import {batchCancelled} from './batch-control.js';
 /** Bounded recovery of an upstream social-provider outage; reuses exact post keys/bodies. */
 import {readFile,writeFile,rename,readdir,open,unlink} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
@@ -31,6 +32,7 @@ try{
   // Wait in short increments so termination does not leave a sleeping orphan.
   for(let i=0;i<30&&!stopped;i++)await sleep(10000);
   if(stopped||Date.now()>=end)break;
+  const currentBatch=await read('overnight-state.json');if(batchCancelled(folder,currentBatch.id))break;
   const latestPolicy=await read('publishing-policy.json');
   if(latestPolicy.stop_at!==policy.stop_at)throw Error('Posting authorization deadline changed; recovery stopped');
   if(store.get(probe.state.job_id)?.publication?.cancel_requested)throw Error('Recovery post was cancelled');

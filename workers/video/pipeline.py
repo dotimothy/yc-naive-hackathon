@@ -73,7 +73,7 @@ def process_video(source_path, output_dir, options, emit):
     source_hash = sha256(source_path)
     ball = None
     ball_report = None
-    ball_stride = options.get("ball_stride", 2)
+    ball_stride = options.get("ball_stride", 3)
     ball_status = "disabled"
     if options.get("basketball"):
         emit("basketball.updated", dict(status="running", report=None))

@@ -51,6 +51,7 @@ class BasketballPass:
             metadata=self.metadata,
             model=self.detector.manifest,
             device=self.detector.device,
+            inference_runtime=getattr(self.detector, "inference_runtime", None),
             stride=self.stride,
             coverage_scope="partial_video",
             analyzed_until_ms=self.last_time,

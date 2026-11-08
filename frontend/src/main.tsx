@@ -65,8 +65,36 @@ function App() {
   const [games, setGames] = useState<Game[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [removedGame, setRemovedGame] = useState<Game | null>(null);
+  const [libraryBusy, setLibraryBusy] = useState(false);
   const [view, setView] = useState<AppView>(() => (window.location.hash === '#naive' ? 'naive' : 'film'));
   const changeView = (v: AppView) => { setView(v); window.history.replaceState(null, '', v === 'naive' ? '#naive' : window.location.pathname + window.location.search); };
+
+  const removeGame = async (game: Game) => {
+    if (!window.confirm(`Remove “${game.title}” from the game library? Local video and analysis files will be kept.`)) return;
+    setLibraryBusy(true);
+    try {
+      await api.removeGame(game.game_id);
+      setGames(current => current?.filter(g => g.game_id !== game.game_id) ?? []);
+      setSelectedId(current => current === game.game_id ? null : current);
+      setRemovedGame(game);
+      setListError(null);
+    } catch (error) { setListError(errorText(error, 'Could not remove video')); }
+    finally { setLibraryBusy(false); }
+  };
+
+  const undoRemove = async () => {
+    if (!removedGame) return;
+    setLibraryBusy(true);
+    try {
+      const restored = await api.restoreGame(removedGame.game_id);
+      setGames(current => [...(current ?? []).filter(g => g.game_id !== restored.game_id), restored]);
+      setSelectedId(restored.game_id);
+      setRemovedGame(null);
+      setListError(null);
+    } catch (error) { setListError(errorText(error, 'Could not restore video')); }
+    finally { setLibraryBusy(false); }
+  };
 
   const loadGames = useCallback(async () => {
     try {
@@ -124,6 +152,7 @@ function App() {
               <h2>Game Library</h2>
               <button className="ghost small" onClick={() => void loadGames()}>Refresh</button>
             </div>
+            {removedGame && <p className="small" role="status">Removed {removedGame.title}. <button className="link inline" disabled={libraryBusy} onClick={() => void undoRemove()}>Undo</button></p>}
             {listError && (
               <div className="alert error">
                 {listError}
@@ -155,6 +184,7 @@ function App() {
                         {g.sport} · {formatMs(g.duration_ms)} · {g.width}×{g.height} · {Number(g.fps).toFixed(2)} fps
                       </span>
                     </button>
+                    <button className="ghost small library-remove" disabled={libraryBusy} aria-label={`Remove ${g.title} from library`} onClick={() => void removeGame(g)}>Remove</button>
                   </li>
                 ))}
               </ul>
@@ -175,6 +205,13 @@ function App() {
           )}
         </main>
       </div>
+      <footer className="sponsor-footer" aria-label="Sponsor Acknowledgements">
+        <div><strong>Sponsor Technologies</strong><span>With Thanks To Our Hackathon Sponsors</span></div>
+        <nav aria-label="Sponsor Websites">
+          <a href="https://usenaive.ai/docs/sdk/typescript" target="_blank" rel="noopener noreferrer">Naive SDK <span aria-hidden="true">↗</span></a>
+          <a href="https://www.agentmail.to/" target="_blank" rel="noopener noreferrer">AgentMail <span aria-hidden="true">↗</span></a>
+        </nav>
+      </footer>
     </div>
   );
 }
@@ -393,8 +430,8 @@ function GameRoom({ game }: { game: Game }) {
             <span className="muted small playhead-readout">{formatMs(playheadMs)}</span>
           </div>
           <div className="controls">
-            <button className="secondary small" disabled={!selectedTrack || active || correcting} onClick={() => void correctIdentity()}>Split selected track at playhead</button>
-            <button className="ghost small" disabled={active || correcting || job?.status !== 'succeeded'} onClick={() => void correctIdentity(true)}>Undo identity splits</button>
+            <button className="secondary small" disabled={!selectedTrack || active || correcting} onClick={() => void correctIdentity()}>Split Selected Track at Playhead</button>
+            <button className="ghost small" disabled={active || correcting || job?.status !== 'succeeded'} onClick={() => void correctIdentity(true)}>Undo Identity Splits</button>
             <span className="fineprint">Select a track and seek to a swap. Splits snap to a sampled frame and clear saved player groups, reviews and highlight clips for this analysis.</span>
           </div>
           {correctionError && <div className="alert error">{correctionError}</div>}
@@ -659,8 +696,8 @@ function ClipsPanel({ clips, events, job, onSeek }: { clips: Clip[]; events: Rec
         </div>
       )}
       {clips.length > 0 && <div className="table-pagination"><span>Clips {current * 4 + 1}–{Math.min((current + 1) * 4, clips.length)} of {clips.length}</span>
-        <button className="secondary small" disabled={current === 0} onClick={() => setPage(current - 1)}>Previous clips</button>
-        <button className="secondary small" disabled={current + 1 >= pages} onClick={() => setPage(current + 1)}>Next clips</button>
+        <button className="secondary small" disabled={current === 0} onClick={() => setPage(current - 1)}>Previous Clips</button>
+        <button className="secondary small" disabled={current + 1 >= pages} onClick={() => setPage(current + 1)}>Next Clips</button>
       </div>}
     </section>
   );

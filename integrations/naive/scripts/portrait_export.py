@@ -16,6 +16,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--snapshot", required=True)
 parser.add_argument("--output-dir", required=True)
 parser.add_argument("--plan-only", action="store_true")
+parser.add_argument("--format", choices=["quiz", "story"], default="quiz")
 parser.add_argument("--quizzes")
 parser.add_argument("--quiz-music")
 a = parser.parse_args()
@@ -26,6 +27,10 @@ if hashlib.sha256(source.read_bytes()).hexdigest() != snapshot["source_sha256"]:
 folder = Path(a.output_dir)
 folder.mkdir(parents=True, exist_ok=True)
 plan = build_plan(snapshot)
+if a.format == "story":
+    from workers.render.story import build_story_plan
+
+    plan = build_story_plan(plan)
 if not plan["segments"]:
     raise ValueError("No sufficiently tracked highlighted players")
 (folder / "plan.json").write_text(json.dumps(plan, indent=2))
@@ -94,9 +99,10 @@ subprocess.run(
 cover = render_cover(source, plan, quizzes, folder / "cover.jpg")
 receipt.update(
     cover=cover,
-    presentation_style="broadcast-quiz-v2",
+    presentation_style=plan["presentation_style"],
     job_id=snapshot["job_id"],
     source_sha256=snapshot["source_sha256"],
+    source_attribution=snapshot.get("source_attribution"),
     sha256=hashlib.sha256(output.read_bytes()).hexdigest(),
     output_path=str(output),
     decoded=True,

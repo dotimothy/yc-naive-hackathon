@@ -1,3 +1,5 @@
+import {batchCancelled} from './batch-control.js';
+import {readFileSync} from 'node:fs';
 import { createHash } from 'node:crypto';
 import { readFile,writeFile,rename,readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -18,7 +20,7 @@ try {
  if(jobFlag>=0&&!requestedJob)throw new Error('--job requires an ID');
  const workflow=(requestedJob?[store.get(requestedJob)].filter(Boolean):store.all()).find(r=>r.state==='succeeded'&&r.output?.clips?.length&&publishingSource(r.output.source_sha256));
  if(!workflow)throw new Error('No completed crew workflow with clips');
- const assertActive=()=>{if(store.get(workflow.job_id)?.publication?.cancel_requested)throw new Error('Publication cancellation requested');};
+ const assertActive=()=>{let batch:any={items:[]};try{batch=JSON.parse(readFileSync(folder+'overnight-state.json','utf8'));}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;}if(batchCancelled(folder,batch.id)&&batch.items.some((r:any)=>r.job_id===workflow.job_id))throw Error('Batch cancelled');if(store.get(workflow.job_id)?.publication?.cancel_requested)throw new Error('Publication cancellation requested');};
  assertActive();
  const selected=workflow.output.clips[0];
  const attribution=publishingSource(workflow.output.source_sha256);if(!attribution)throw new Error('Source is not authorized for publishing');
@@ -35,8 +37,11 @@ try {
  console.log(JSON.stringify({event:'publishing_media_ready',profile:PORTRAIT_PROFILE,players:prepared.recipe.track_count,quizzes:prepared.recipe.quiz_count,music_missing:prepared.recipe.quiz_music_missing,output_fps:frameRate(prepared.metadata.streams.find(s=>s.codec_type==='video')?.avg_frame_rate),sha256:prepared.sha256}));
  if(!process.argv.includes('--prepare-only')) {
  if(!prepared.recipe.quiz_count||prepared.recipe.quiz_music_missing)throw new Error('Portrait preview is ready; a grounded quiz and the requested quiz music are required before publishing');
- const key='playlattice-tiktok-'+PORTRAIT_PROFILE+'-'+clip.clip_id;
- const file=folder+'publish-public-tiktok-'+PORTRAIT_PROFILE+'-'+clip.clip_id+'.json';
+ const revision=process.argv.includes('--new-design')?'-'+prepared.recipe.presentation_style+'-'+prepared.sha256.slice(0,12):'';
+ if(revision&&prepared.recipe.presentation_style!=='broadcast-quiz-v2')throw Error('Expected the reviewed redesigned presentation');
+ const deliveryProfile=PORTRAIT_PROFILE+revision;
+ const key='playlattice-tiktok-'+deliveryProfile+'-'+clip.clip_id;
+ const file=folder+'publish-public-tiktok-'+deliveryProfile+'-'+clip.clip_id+'.json';
  let state:any;
  try{state=JSON.parse(await readFile(file,'utf8'));}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;}
  state ||= {key,created_ms:Date.now(),job_id:workflow.job_id,clip_id:clip.clip_id,identity,visibility:'public',platform:'tiktok',source_sha256:clip.source_sha256,media_sha256:prepared.sha256,source_clip_sha256:clip.sha256,media_profile:PORTRAIT_PROFILE};
@@ -85,7 +90,7 @@ try {
    if(Date.now()-state.created_ms>23*60*60*1000)throw new Error('Post replay window expired; no new post submitted');
    const latest=await read(`/api/games/${encodeURIComponent(workflow.game_id)}/jobs`);
    if(latest.items.at(-1)?.job_id!==workflow.job_id||store.get(workflow.job_id)?.state!=='succeeded')throw new Error('Workflow changed before publication');
-   assertActive();store.reservePublication(workflow.job_id,PORTRAIT_PROFILE);
+   assertActive();store.reservePublication(workflow.job_id,deliveryProfile);
    state.post_attempted=true;await save();
    const post=await client.social.createPost(identity,state.body);state.post_id=post.id;
   }

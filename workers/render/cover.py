@@ -70,10 +70,23 @@ def render_cover(source, plan, quizzes, output):
     )
     d.text((47, 46), "PLAYLATTICE", font=font(27, True), fill="white")
     d.rounded_rectangle((32, 711, 319, 752), radius=8, fill="#ff8845")
-    d.text((45, 721), "READ THE NEXT MOVE", font=font(21, True), fill="#17110d")
-    d.text((31, 781), "CAN YOU", font=font(78, True), fill="white")
-    d.text((31, 872), "READ THE", font=font(78, True), fill="white")
-    d.text((31, 963), "NEXT MOVE?", font=font(78, True), fill="#ff9758")
+    story = plan.get("profile") == "player-portrait-story-v1"
+    d.text(
+        (45, 721),
+        "THE PLAY BREAKDOWN" if story else "READ THE NEXT MOVE",
+        font=font(21, True),
+        fill="#17110d",
+    )
+    d.text(
+        (31, 781), "FOLLOW" if story else "CAN YOU", font=font(78, True), fill="white"
+    )
+    d.text((31, 872), "THE" if story else "READ THE", font=font(78, True), fill="white")
+    d.text(
+        (31, 963),
+        "MOVEMENT" if story else "NEXT MOVE?",
+        font=font(78, True),
+        fill="#ff9758",
+    )
     d.line((34, 1080, 636, 1080), fill="#9aa9b7", width=2)
     d.text(
         (34, 1102),
@@ -82,7 +95,10 @@ def render_cover(source, plan, quizzes, output):
         fill="white",
     )
     d.text(
-        (34, 1145), f"{len(quizzes)} PREDICTION QUIZZES", font=font(25), fill="#bdd5e2"
+        (34, 1145),
+        "CAPTIONED PLAYER STORIES" if story else f"{len(quizzes)} PREDICTION QUIZZES",
+        font=font(25),
+        fill="#bdd5e2",
     )
     d.text(
         (34, 1215),
