@@ -540,7 +540,7 @@ function HighlightsPanelInner({ gameId, jobId, analysisActive, onSeek, onUpdated
       ) : (
         <>
           <SectionTabs id="highlight" label="Highlight review sections" value={view} onChange={setView} tabs={[
-            { id: 'players', label: 'Players' }, { id: 'candidates', label: 'Candidate review' }, { id: 'identity', label: 'Identity corrections' },
+            { id: 'players', label: 'Players' }, { id: 'candidates', label: 'Candidate Review' }, { id: 'identity', label: 'Identity Corrections' },
           ]} />
           <div id="highlight-panel-players" role="tabpanel" aria-labelledby="highlight-tab-players" hidden={view !== 'players'}>
           <div className="panel-head hl-section"><h4>Reviewed basketball evidence</h4><label className="toggle"><input type="checkbox" checked={showAllTracks} onChange={e => setShowAllTracks(e.target.checked)} /> Show all {players.length} track groups</label></div>

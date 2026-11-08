@@ -174,9 +174,9 @@ function IngestPanel({ onGame }: { onGame: (g: Game) => void }) {
 }
 
 const ROOM_TABS = [
-  { id: 'film', label: 'Film' }, { id: 'highlights', label: 'Players & highlights' },
-  { id: 'shots', label: 'Camera shots' }, { id: 'ball', label: 'Ball & hoop' },
-  { id: 'clips', label: 'Clips' }, { id: 'analysis', label: 'Analysis details' },
+  { id: 'film', label: 'Film' }, { id: 'highlights', label: 'Players & Highlights' },
+  { id: 'shots', label: 'Camera Shots' }, { id: 'ball', label: 'Ball & Hoop' },
+  { id: 'clips', label: 'Clips' }, { id: 'analysis', label: 'Analysis Details' },
 ] as const;
 type RoomTab = typeof ROOM_TABS[number]['id'];
 
