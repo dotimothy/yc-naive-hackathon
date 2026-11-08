@@ -1,0 +1,11 @@
+# Scout Source Discovery Brief
+
+On 2026-11-08 the operator assigned upstream video discovery to the existing Scout and requested sources beyond Google Drive. `integrations/naive/src/scout-configure.ts` appended a persistent discovery brief, verified it by readback, and repinned the existing CEO roster to Scout version 5 (CEO version 10). No new agent, session, schedule, privilege, account action, outreach or publishing change was created.
+
+The source priority is creator/club/coach-owned footage with recorded permission; original publisher content with suitable verified Creative Commons terms; official openly licensed sports datasets; and supplemental file-level licensed Wikimedia Commons footage. Existing authorized Drive inventory remains eligible. Scout should inspect actual previews for stationary wide court coverage and coherent gameplay; titles alone cannot establish camera quality. Unknown visual evidence stays unverified, and inaccessible sources or unclear reuse evidence are skipped automatically.
+
+Each handoff includes source URL, creator/title, permission/license evidence, access method, inspected frames/times, camera-quality evidence, proposed initial gameplay windows, timing basis, verified dimensions/duration if available, duplicate key, disposition and reasons. The clipper validates bounds and camera cuts before submitting source segments to local analysis. Downstream analysis, portrait quizzes, captions and publishing retain their existing ownership and controls.
+
+This is configured behavior, not a completed autonomous ingress service. The local analysis dispatcher still uses its pinned metadata-only CEO version 5 and Scout version 2, so an analyzed clip cannot unexpectedly trigger new web research. The remaining integration is a budgeted discovery trigger, validated candidate storage, visual screening and a deduplicated source/clip-to-local-API handoff. No paid discovery run was started by this configuration step.
+
+Source references: YouTube's Creative Commons guidance https://support.google.com/youtube/answer/2797468 ; TrackID3x3 dataset terms https://github.com/open-starlab/TrackID3x3/blob/main/README.md ; Wikimedia per-file licensing https://commons.wikimedia.org/wiki/Commons:Licensing .
