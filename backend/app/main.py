@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 from workers.render.media import probe, sha256
 from workers.video.coordinated import run_analysis as process_video
-from workers.video.runtime import available_devices, select_device
+from workers.video.runtime import available_devices, select_device, POSE_MODEL
 from backend.app.highlight_routes import router as highlight_router, public_highlights
 from backend.app.basketball_routes import router as basketball_router
 from workers.video.sports.basketball import OUTDOOR_SAMPLE_COURT
@@ -448,7 +448,7 @@ class Analysis(BaseModel):
     candidate_ranges: list[Cut] = Field(default_factory=list, max_length=10)
     replay_paced: bool = False
     stride: int = Field(default=5, ge=1, le=20)
-    confidence: float = Field(default=0.75, ge=0.1, le=0.99)
+    confidence: float = Field(default=0.25, ge=0.1, le=0.99)
 
 
 @app.post("/api/games/{game_id}/analyze", status_code=202)
@@ -457,6 +457,7 @@ def analyze(
 ):
     game = get("game", game_id)
     options = body.model_dump()
+    options["pose_model"] = POSE_MODEL
     try:
         select_device(options["device"])
     except ValueError as exc:

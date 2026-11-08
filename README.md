@@ -4,6 +4,7 @@ Private YC Naive Hackathon prototype; product name is PlayLattice.
 
 Build a sports video intelligence platform, starting with basketball. The first local workflow is video → pose/tracking → replay dashboard → source-verified clips, followed by private opt-in athlete profiles. Keep shared media processing reusable across sports; validate basketball first. Naive orchestration and sponsors follow after the local core is accepted.
 
+- [YOLO26 pose model validation](docs/YOLO26_POSE_VALIDATION.md)
 - [Unified player and ball analysis](docs/UNIFIED_ANALYSIS.md)
 - [Reviewed basketball statistics and attribution](docs/REVIEWED_STATS_CONTRACT.md)
 - [Ball and hoop detector setup and limitations](docs/BALL_HOOP_HANDOFF.md)

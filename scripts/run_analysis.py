@@ -10,6 +10,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 
+def normalize_options(options):
+    """Old API processes may enqueue jobs while a model migration awaits an idle reload."""
+    options = dict(options)
+    if options.get("pose_model") != "ultralytics/yolo26n-pose":
+        options.update(pose_model="ultralytics/yolo26n-pose", confidence=0.25)
+    return options
+
+
 def main():
     channel = sys.stdout
     request = json.loads(sys.stdin.readline())
@@ -26,7 +34,10 @@ def main():
         from workers.video.pipeline import process_video
 
         report = process_video(
-            request["source"], request["output"], request["options"], emit
+            request["source"],
+            request["output"],
+            normalize_options(request["options"]),
+            emit,
         )
     channel.write(json.dumps(dict(kind="result", payload=report)) + "\n")
     channel.flush()

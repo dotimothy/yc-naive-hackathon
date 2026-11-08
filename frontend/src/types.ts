@@ -61,7 +61,7 @@ export type Job = {
   report?: JobReport;
 };
 
-export type Keypoint = { name: string; x: number; y: number; visibility: number };
+export type Keypoint = { name: string; x: number; y: number; visibility: number; confidence?: number };
 
 /** Anonymous colour grouping by first appearance — never a real team or a confirmed fact. */
 export type TeamLabel = 'Team A' | 'Team B' | 'unknown';

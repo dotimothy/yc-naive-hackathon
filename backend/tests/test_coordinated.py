@@ -77,7 +77,7 @@ def test_single_decoder_model_cadences_and_source_timestamps(
     )
 
     def infer(model, tensor, device):
-        pose_frames.append(round(float(tensor[0, 0, 0]) * 255))
+        pose_frames.append(int(tensor[0, 0, 0]))
         return (
             dict(
                 scores=torch.tensor([0.99]),

@@ -91,7 +91,7 @@ export const api = {
     request<Job>(`/api/games/${enc(gameId)}/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
-      body: JSON.stringify({ stride: 5, replay_paced: false }),
+      body: JSON.stringify({ stride: 5, confidence: 0.25, replay_paced: false }),
     }),
 
   listJobs: (gameId: string, signal?: AbortSignal) =>

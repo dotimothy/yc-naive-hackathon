@@ -1,5 +1,7 @@
 # Accelerated video worker
 
+**Current pose model:** YOLO26n-pose replaces the R-CNN runtime below. It runs its learned network and tensor postprocessing natively on MPS with CPU fallback disabled; source decode/letterboxing and final serialized output remain CPU operations. Default input size1280, confidence0.25, NMS-free end-to-end head, FP32. See [migration validation](YOLO26_POSE_VALIDATION.md), including lower player coverage. The hybrid descriptions and measurements below are retained as historical R-CNN results, not current-model claims.
+
 ## Device policy
 
 The default is `auto`: CUDA device 0, then Apple MPS, then CPU. Override globally with `SCOUTFILM_DEVICE=cpu|mps|cuda|cuda:N`, or per analysis with JSON `{"device":"mps"}`. Explicit unavailable devices are rejected with HTTP 422 rather than silently running on CPU. `/api/health` lists hardware availability; it is not a model warmup or a CUDA-operator certification.

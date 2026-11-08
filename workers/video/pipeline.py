@@ -8,7 +8,13 @@ from pathlib import Path
 import cv2
 import numpy as np
 import torch
-from workers.video.runtime import select_device, get_model, infer
+from workers.video.runtime import (
+    select_device,
+    get_model,
+    infer,
+    POSE_MODEL,
+    KEYPOINT_THRESHOLD,
+)
 from workers.video.tracker import ContinuityTracker, iou
 from workers.video.teams import TeamGrouper, flag_non_players, torso_colour_feature
 from workers.video.identity import (
@@ -95,9 +101,7 @@ def process_video(source_path, output_dir, options, emit):
             ),
         )
     model, model_load_seconds, model_cache_hit = get_model(device)
-    # Reject low-score detections before the expensive pose head, not after it.
-    # A single worker owns the cached model and sets this for every job.
-    model.roi_heads.score_thresh = options.get("confidence", 0.75)
+    model.confidence = options.get("confidence", 0.25)
     tracker, samples, processed = ContinuityTracker(), [], 0
     teams = TeamGrouper()
     track_descriptors = {}
@@ -170,19 +174,12 @@ def process_video(source_path, output_dir, options, emit):
             if not pose_due:
                 index += 1
                 continue
-            tensor = (
-                torch.from_numpy(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-                .permute(2, 0, 1)
-                .float()
-                .div(255)
-                .to("cpu" if device == "mps" else device)
-            )
-            result, seconds, copy_seconds = infer(model, tensor, device)
+            result, seconds, copy_seconds = infer(model, frame, device)
             inference_time += seconds
             transfer_time += copy_seconds
             if first_inference_seconds is None:
                 first_inference_seconds = seconds
-            keep = result["scores"] >= options.get("confidence", 0.75)
+            keep = result["scores"] >= options.get("confidence", 0.25)
             if options.get("court_polygon"):
                 polygon = np.array(options["court_polygon"], dtype=np.float32)
                 in_court = [
@@ -228,6 +225,11 @@ def process_video(source_path, output_dir, options, emit):
                     }
                     for name, p in zip(NAMES, kp)
                 ]
+                if "keypoint_scores" in result:
+                    for point, confidence in zip(
+                        points, result["keypoint_scores"][keep][j]
+                    ):
+                        point["confidence"] = float(confidence)
                 batch.append(
                     dict(
                         game_id=game,
@@ -362,14 +364,19 @@ def process_video(source_path, output_dir, options, emit):
         metadata=metadata,
         requested_device=requested_device,
         device=device,
-        execution_mode="mps-hybrid" if device == "mps" else device,
+        execution_mode=device,
         model_cache_hit=model_cache_hit,
         model_load_seconds=model_load_seconds,
         inference_seconds=inference_time,
         output_transfer_seconds=transfer_time,
         first_inference_seconds=first_inference_seconds,
         precision="float32",
-        model="torchvision/keypointrcnn_resnet50_fpn/COCO_V1",
+        model=POSE_MODEL,
+        pose_model_manifest=getattr(model, "manifest", None),
+        pose_image_size=getattr(model, "image_size", None),
+        pose_confidence_threshold=options.get("confidence", 0.25),
+        pose_end_to_end=True,
+        keypoint_visibility_threshold=KEYPOINT_THRESHOLD,
         tracker="Continuity + review-only fragment reconnection",
         tracker_version="continuity-review-fragments-v1",
         continuity_stats=tracker.stats,

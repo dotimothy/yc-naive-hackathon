@@ -55,6 +55,7 @@ def run_analysis(source, output, options, emit):
             stderr=log,
             text=True,
             bufsize=1,
+            env=dict(os.environ, PYTORCH_ENABLE_MPS_FALLBACK="0"),
         )
 
         def read():

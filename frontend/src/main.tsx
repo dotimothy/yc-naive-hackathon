@@ -298,7 +298,7 @@ function GameRoom({ game }: { game: Game }) {
             Boxes and keypoints are raw person-detector/pose predictions on sampled frames, shown at the nearest prior sample within 400 ms — never interpolated.
             New analysis keeps uncertain fragments separate; proposed reconnections require review. Player labels remain provisional. Tracks can include referees or spectators. No names or jersey numbers are inferred.
             “A?/B?” tags are an anonymous colour grouping and “non-player?/role?” tags are review prompts (dashed box); neither is verified and nobody is hidden automatically.
-            Keypoint dots show the model's visibility flag, not a calibrated confidence.
+            Keypoint dots use a visibility filter; model scores are not calibrated certainty.
           </p>
         </section>
 

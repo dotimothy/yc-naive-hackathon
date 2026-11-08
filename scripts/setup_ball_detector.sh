@@ -8,3 +8,4 @@ printf '%s\n' "$scoutfilm_core_site" > "$scoutfilm_ball_site/shared_torch.pth"
 .venv-ball/bin/python -m pip install --upgrade pip
 .venv-ball/bin/python -m pip install -r requirements-ball.txt -c requirements.txt
 .venv/bin/python scripts/download_basketball_model.py
+.venv/bin/python scripts/download_pose_model.py
