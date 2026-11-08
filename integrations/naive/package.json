@@ -16,7 +16,8 @@
     "session:inspect": "tsx src/inspect-session.ts",
     "crew:check": "tsx src/crew-check.ts",
     "crew:configure": "tsx src/crew-configure.ts",
-    "crew:watch": "tsx src/analysis-dispatcher.ts"
+    "crew:watch": "tsx src/analysis-dispatcher.ts",
+    "publish:test": "tsx src/publish-test.ts"
   },
   "dependencies": {
     "@usenaive-sdk/managed-agents": "0.12.3"

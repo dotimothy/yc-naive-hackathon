@@ -104,3 +104,15 @@ The sidecar listens on **127.0.0.1:8011**:
 - `POST /workflows/JOB_ID/cancel` with `X-PlayLattice-Local: 1` and no Origin header — optional cancellation during agent work
 
 Cancelling/superseding the local analysis is also detected. The existing UI's CV cancel button does not yet control agent work after CV completes; use the sidecar cancellation route for this stage. Keep the dispatcher process running for automatic completion handoffs; stopping it preserves queued/running work for restart.
+
+### Unlisted publication test
+
+The operator authorized automatic **unlisted-only** publication. Run:
+
+```sh
+npm run publish:test
+```
+
+This narrow acceptance test takes one selected clip from a completed crew result for the pinned indoor TrackID3x3 sample. It verifies current analysis/clip provenance and the media hash, requires exactly one connected YouTube account, uploads the MP4, posts with explicit `visibility: unlisted`, and reconciles its status and URL. TikTok is excluded. Captions contain only grounded duration/uncertainty and the source's CC BY 4.0 credit. No inference or extra agent sessions are started.
+
+Private `data/naive/publish-test-*.json` journals retain upload/post IDs and stable request bodies. Reruns reconcile existing files/posts, and post creation reuses one idempotency key; ambiguous uploads are reconciled rather than blindly repeated. A post with a reported visibility mismatch is removed. A pending or failed provider response is not reported as successful publication. This is an explicit test command, not a general automatic publisher for all uploaded sources.
