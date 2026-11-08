@@ -2,13 +2,21 @@
 
 Draft for implementation, 2026-11-07. Baseline: `develop` at `d18f047`; local Phase 1 is complete. This plan does not provision agents, change budgets, deploy a bridge or start paid tests.
 
+## Implementation status — existing crew analysis handoff
+
+The first connection is implemented under `integrations/naive/src/analysis-*.ts`: a loopback sidecar watches completed local analyses, freezes bounded source-linked clip metadata, and dispatches a version-pinned session on the existing CEO. The CEO delegates source checking, selection, captions, packaging and consistency checking to all five existing specialists. Each integration version denies external tools; normal defaults are restored after version creation. No new agents or budget increases are required.
+
+This is a **metadata-only completion handoff**, not the later remote MCP bridge or VLM discovery pipeline. The GPU worker remains local and unchanged. Outputs are available at `http://127.0.0.1:8011/workflows`; they are not yet shown in the main dashboard. The sidecar supports cancellation and detects superseded/cancelled analysis. Existing UI cancellation after CV completion is still an integration gap.
+
+Implemented controls include SQLite state/reservations, stable persisted request bodies and idempotency keys, $1 root-session cap, $9/month dispatcher reservations (leaving $1 for onboarding), five-member completion checks, source/clip validation, overlap/output-length limits, and cancellation winning over late success. Software validation: TypeScript plus 22 tests. The real TrackID3x3 handoff was accepted as one session, but its completed-team acceptance is pending intermittent Naive capacity errors. Do not describe the six-agent live path as validated until all five members return and output/cost checks pass.
+
 ## 1. Goal and acceptance target
 
 **Authorized video input → automatic analysis → agent-selected highlights → validated playable outputs.** No human approval, identity confirmation, event review or Generate click is required between input and output. A user can cancel during analysis, agent work or rendering.
 
 First end-to-end target: submit a short basketball video once, produce up to five distinct source-linked clips with selection reasons, expose them in the existing dashboard, and record job/session provenance and actual cost. Fewer clips or an explicit empty result are valid when evidence is insufficient. An uncertain identity must never become a verified athlete just to fill the requested clip count.
 
-The Naive company is the existing **PlayLattice AI organization**. We will build a small team within it, not create another organization or install an unrelated company template. Sponsors, publishing, outreach, profiles and new sports remain outside this milestone.
+The Naive company is the existing **PlayLattice AI organization**. We will reuse its existing CEO and five-specialist sports crew. Sponsors, publishing, outreach, profiles and new sports remain outside this milestone.
 
 ## 2. What exists and what must be built
 
@@ -21,26 +29,31 @@ The Naive company is the existing **PlayLattice AI organization**. We will build
 | SQLite jobs/audit, replayable updates and cancellation | Workflow state linking CV jobs, Naive threads and render jobs |
 | Tabs, player table and playable clips | Workflow progress, reasons, costs, fallback and cancellation UI |
 | Pinned TypeScript SDK/CLI and authenticated account | Authenticated remotely reachable tool bridge |
-| One capped curator and successful metadata smoke | Coordinator + curator + verifier roles and team acceptance |
+| One capped curator and successful metadata smoke | Existing crew binding, scoped handoffs and team acceptance |
 
 The current highlight-generation route accepts clip-count parameters; it does not accept an arbitrary agent-selected time-range plan. The existing shot export renders an entire camera shot. Neither should be presented as the proposed clip-plan API.
 
 The onboarding smoke supplied real metrics as text to the agent. It did not demonstrate a hosted agent fetching the local API, inspecting video or rendering clips. Its recorded spend was $0.00051; that is not a forecast for the full workflow.
 
-## 3. Company team and responsibility boundaries
+## 3. Existing crew and two-stage integration
 
-| Role | Responsibility | Allowed capabilities | Output |
-| --- | --- | --- | --- |
-| Coordinator | Own the video task; delegate; handle bounded recovery; deliver results | Read workflow/evidence, delegate to pinned roster, submit a validated plan, inspect render status | Final job result and explanation |
-| Clip curator | Select coherent, non-duplicate sequences with useful lead-in/out | Read scoped candidate evidence and bounded visual evidence when supported | Structured clip plan with source reasons |
-| Verifier | Independently challenge selections, attribution and visual claims | Read the frozen plan/evidence and bounded previews; read technical QA | Structured pass/revise/drop decisions |
-| Deterministic Python worker | Decode, infer, enforce bounds, render and independently check media | Existing local model/render functions | Observations, manifests, MP4s and QA |
+Updated after account inspection and operator approval: reuse the existing PlayLattice AI crew. Do not create a coordinator, verifier or replacement specialists. The standalone onboarding curator stays outside this workflow.
 
-Reuse the existing curator agent ID. Add two agents only when the corresponding milestone is ready. No nested delegation or dynamic hiring. Curator and verifier do not receive shell, billing, messaging, publishing, credential-management or arbitrary file tools.
+| Stage | Existing agents | Responsibility |
+| --- | --- | --- |
+| Coordination | CEO | Existing pinned roster; bounded orchestration and recovery |
+| Ingress | scout → clipper | Discover authorized configured sources; use supported visual evidence to select gameplay windows; preserve original time offsets |
+| Local analysis | Deterministic PlayLattice worker | GPU tracking, basketball observations, camera boundaries, source-linked highlights and media QA |
+| Egress | caption-editor → channel-manager | Evidence-grounded captions and output packaging; publishing remains disabled during integration validation |
+| Feedback | analyst | Social performance after publishing is enabled; not basketball inference |
 
-Use version-pinned coordinator roster entries and bounded point-to-point delegation. Naive represents a team as a coordinator agent with a roster, not a separate company/team resource. A shared board can later mirror progress; the local workflow database remains authoritative. [Team reference](https://usenaive.ai/docs/team/overview).
+The executable ID binding is `integrations/naive/src/crew.ts`. Run `npm run crew:check` in that package to verify members and CEO roster without creating sessions or changing account configuration. Add `-- --evidence` to prepare a metadata-only handoff preview from completed local analysis; it does not dispatch it.
 
-Technical QA stays deterministic: another LLM is not needed to count frames or compute hashes. The verifier's useful work is semantic evidence consistency and, once supported, visual inspection. The existing text smoke does not establish the current model's visual-input support. Validate a model's actual image/video request format and cost before giving the verifier visual work. Until then, label verification as metadata consistency, not visual validation.
+Target flow: scout → clipper → local PlayLattice analysis → caption-editor → channel-manager → analyst feedback. For the first diagnostic, an authorized local upload can enter directly at analysis. Full discovery, supported VLM input, source transfer and TikTok connectivity must each be tested before claiming the full workflow works.
+
+Technical QA stays deterministic. Semantic checks belong inside ingress/egress rather than a newly provisioned verifier. Uncertain observations must remain uncertain in captions. No agent may turn provisional tracks into verified athlete identity or official stats.
+
+Existing agents have broad preconfigured capabilities and some ask-gated tools. The integration must supply initial source/target preferences and scoped tool access so ordinary processing needs no human intervention. Video execution remains disabled until the bridge, cancellation and per-workflow budget enforcement are implemented. Do not launch independent board jobs as a substitute for bounded delegation.
 
 ## 4. Architecture and connectivity
 
@@ -51,9 +64,9 @@ flowchart TD
     CV --> S[Immutable insight snapshot]
     S --> O[Durable completion outbox]
     O --> D[TypeScript dispatcher]
-    D --> C[Naive coordinator session]
-    C --> P[Clip curator]
-    P --> V[Verifier]
+    D --> C[Existing CEO session]
+    C --> P[Existing specialists]
+    P --> V[Evidence checks]
     V --> C
     C --> MCP[Authenticated PlayLattice MCP bridge]
     MCP --> VALID[Python clip-plan validation]
@@ -72,14 +85,14 @@ The MCP bridge authenticates a scoped credential distinct from the Naive organiz
 
 ## 5. Workflow lifecycle
 
-1. The user supplies authorized footage and optional preferences at submission: scope (whole game or an existing provisional player group), maximum clips and output constraints. Default output preserves source aspect ratio.
+1. The scout discovers footage from configured authorized sources and the clipper selects bounded gameplay windows using supported visual evidence, preserving original-source offsets. An authorized local upload may bypass discovery for diagnostics. Submission preferences include: scope (whole game or an existing provisional player group), maximum clips and output constraints. Default output preserves source aspect ratio.
 2. Existing server-side ingest starts one CV job. A new durable workflow record links to it. Never start a duplicate analysis merely because an agent asks for status.
 3. On CV completion, write an outbox event in the same persistence boundary as workflow readiness. A local TypeScript dispatcher claims it with a lease, then creates/reconciles one Naive root session using a stable idempotency key.
 4. Freeze an insight snapshot bound to source hash, analysis job, shot ranges, identity revision and effective evidence. The snapshot is immutable and paginated; later edits produce a new revision.
-5. The coordinator delegates a bounded candidate-selection brief. The curator receives only the relevant snapshot slice, not every frame or another agent's transcript.
-6. The verifier returns pass/revise/drop decisions. Allow at most one plan-revision cycle in the first implementation, within the same root budget. No repeated committee loop.
+5. The existing CEO delegates a bounded selection/caption brief to the existing specialists. Each receives only the relevant snapshot slice, not every frame or another agent's transcript.
+6. The caption-editor checks evidence consistency and returns pass/revise/drop decisions. Allow at most one plan-revision cycle in the first implementation, within the same root budget. No repeated committee loop.
 7. The backend validates the proposed plan. It may reject illegal ranges or drop unsupported attribution; it never treats natural-language reasoning as authority to bypass source bounds.
-8. Enqueue FFmpeg rendering, poll machine state and run deterministic QA. When visual verification is supported, give the verifier one bounded post-render preview check; a failed semantic check drops the clip or uses the single permitted revision cycle. Do not rerun inference for a new cut of the same analyzed source.
+8. Enqueue FFmpeg rendering, poll machine state and run deterministic QA. When visual verification is supported, give the caption-editor one bounded post-render preview check; a failed semantic check drops the clip or uses the single permitted revision cycle. Do not rerun inference for a new cut of the same analyzed source.
 9. Atomically commit the clip package only if the workflow is still active and snapshot revision is valid. The dashboard receives final clips, reasons, warnings and actual costs.
 10. On any terminal failure, produce explicit failure/partial/fallback output. Do not ask the user to approve clips or increase a budget to finish the normal flow.
 
@@ -174,11 +187,9 @@ Test cancellation while queued, during inference, during delegation, during rend
 
 ## 9. Budgets, observability and team accounting
 
-Keep the operator's approved **$10/month total allocation** and **$1 per video task**. Proposed monthly split: coordinator $2, curator $5, verifier $3. The existing curator's $10 cap must be migrated down rather than leaving it in place and adding another $10 of agents. This draft makes no budget change.
+The approved integration allocation remains **$10/month and $1 per video task**. Existing crew caps are much larger: CEO $50/month and $5/task; each of five specialists $60/day and $20/task. These are ceilings, not spend. The onboarding curator's $10/month cap does not constrain this crew. Reuse does not authorize raising the integration allocation or silently rewriting unrelated crew budgets.
 
-Use one explicitly $1-budgeted root session with bounded delegated work. Naive documents shared root-session ceilings for waited delegation; member monthly caps remain separate, so root monthly cap alone is not a team cap. Board-assigned top-level jobs have independent budgets and must not be used to launch the initial clip workflow. Confirm accounting with a small live team test before fan-out. [Context and budget semantics](https://usenaive.ai/docs/team/context-and-budgets).
-
-Naive's server remains the monetary enforcement point. The app displays ledger-derived usage, records approved settings and stops/falls back on refusal; it does not implement a competing financial ledger. Never auto-top-up, change a plan or raise a limit. Ask the operator outside the video runtime if later testing requires more than $1/task.
+Before paid execution, implement a $1 root-session ceiling with bounded waited delegation, verify aggregate accounting and enforce the integration monthly allocation. Independent board-assigned tasks have separate budgets and cannot be used to bypass this ceiling. No live dispatch or budget migration is implemented by the crew-binding command. Never auto-top-up, change plans or increase limits. [Budget semantics](https://usenaive.ai/docs/team/context-and-budgets).
 
 Record per-workflow wall time, model calls, CV time, render time, validation failures, retries, selected/dropped counts and costs per member. Avoid double-counting team cost: reconcile the root plus its actual member threads with server usage. Account balance includes other existing agents and subscription activity, so balance delta alone is not this workflow's cost. The present local watcher is observational and requires the machine/process to remain running.
 
@@ -190,8 +201,8 @@ Record per-workflow wall time, model calls, CV time, render time, validation fai
 | B — Explicit plan rendering | Plan validation + asynchronous renderer + registered manifests | A deterministic plan produces source-correct clips with no inference rerun; invalid/cross-cut/stale plans fail |
 | C — Secure tool connection | Dedicated MCP server and authenticated reachability | Hosted diagnostic calls real scoped read tools; unauthenticated/wrong-scope calls fail; original API remains loopback |
 | D — Durable single-agent path | Completion outbox/dispatcher, session reconciliation, automatic output delivery | One input finishes with no manual action; duplicate events and restart create no duplicate sessions/artifacts |
-| E — Company team | Coordinator and verifier, existing curator migrated, pinned roles/delegation | Three-role run respects verified root $1 ceiling and total monthly allocations; no nested/independent board runs |
-| F — Visual verifier | Supported visual model/input format, bounded previews and typed judgments | Demonstrate actual visual input, source-grounded judgments and drop/abstain behavior; record actual cost |
+| E — Company team | Existing CEO and sports specialists, scoped tools and pinned delegation | Existing-crew run respects verified root $1 ceiling and integration monthly allocation; no nested/independent board runs |
+| F — Visual evidence checks | Supported visual model/input format, bounded previews and typed judgments | Demonstrate actual visual input, source-grounded judgments and drop/abstain behavior; record actual cost |
 | G — UI and acceptance | Combined progress/cancel/result package, failure/restart tests, updated handoff | Full input-to-output and cancellation suite passes on real footage; fallbacks/limits remain clear |
 
 D is a diagnostic stepping stone, not the intended final company design. If visual support is ready earlier, implement F before the final E/G demonstration. Do not declare full semantic verification when only metadata checks ran.
@@ -204,7 +215,7 @@ D is a diagnostic stepping stone, not the intended final company design. If visu
 - Naive integration: `integrations/naive/src/` dispatcher, MCP service/tools, session/event persistence, team specification and spend checks.
 - Frontend: combined workflow progress/cancel/output UI through api.ts/types.ts; preserve current tabs and Phase 1 route behavior.
 
-After the lead freezes shared types, backend rendering and local tool-adapter work can proceed in parallel with disjoint ownership. Team provisioning and remote writes wait until the local contracts and advertised tool list are concrete. Do not run concurrent GPU benchmarks while a user video is processing.
+After the lead freezes shared types, backend rendering and local tool-adapter work can proceed in parallel with disjoint ownership. Remote configuration writes wait until the local contracts and advertised tool list are concrete. Do not run concurrent GPU benchmarks while a user video is processing.
 
 ## 11. Required tests and demo
 
@@ -218,8 +229,8 @@ The demonstration is one authorized submission followed only by automatic progre
 
 Deferred: autonomous public publishing, sponsor plugins, verified athlete profiles, recruiting, official basketball statistics, live streams, new sports, model replacement and smart 9:16 reframing of landscape sources. Existing portrait input/export remains supported; source-aspect output does not imply automatic player-following crops.
 
-Implementation decisions to resolve with evidence: authenticated bridge provider/lifetime, visual-verifier model and input format, per-tool response-size limits, deployment location, root-thread cancellation propagation, and whether semantic quality justifies the additional agent/model calls. Preserve the team architecture while allowing a bounded metadata-only diagnostic mode.
+Implementation decisions to resolve with evidence: authenticated bridge provider/lifetime, visual evidence model and input format, per-tool response-size limits, deployment location, root-thread cancellation propagation, and whether semantic quality justifies the additional agent/model calls. Preserve the team architecture while allowing a bounded metadata-only diagnostic mode.
 
-No paid resources or account settings are changed by approving or reading this plan. Before applying the team change, show the exact resource/configuration diff and proposed budget migration; provisioning must use the existing approved limits.
+No paid resources or account settings are changed by approving or reading this plan. Reuse the existing crew IDs. Any later remote configuration change must have a concrete diff and remain within the approved limits.
 
 References: [local Phase 1 acceptance](PHASE1_ACCEPTANCE.md), [developer handoff](HANDOFF.md), [SDK onboarding](../integrations/naive/README.md), [current API contract](API_CONTRACT.md), [Naive SDK reference](https://usenaive.ai/docs/sdk/typescript), [team coordinator](https://usenaive.ai/docs/team/coordinator), [delegation](https://usenaive.ai/docs/team/delegation), [budget enforcement](https://usenaive.ai/docs/concepts/budgets).

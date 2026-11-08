@@ -68,3 +68,39 @@ Read-only requests retry capacity/rate-limit/server/network failures within a bo
 Typecheck and five focused tests pass (read retry, no implicit write replay, HTTPS credential transport, error redaction, and current-job evidence scoping). A real local API read and the paid SDK smoke were also executed.
 
 Source of truth: installed SDK types/source, live `/v1/openapi.json`, [SDK reference](https://usenaive.ai/docs/sdk/typescript), [onboarding instructions](https://usenaive.ai/skill.md), [CLI reference](https://usenaive.ai/docs/cli/naive). This setup uses the SDK directly for an existing project; it does not clone/deploy a media blueprint or run `naive up` over the existing app.
+
+### Existing sports crew
+
+Use the existing CEO, scout, clipper, caption-editor, channel-manager and analyst; IDs and ingress/egress mapping live in `src/crew.ts`. The onboarding curator is separate and is not dispatched by this path.
+
+```sh
+npm run crew:check
+npm run crew:check -- --evidence
+```
+
+Both commands are read-only. The second also reads completed local analysis and prints a metadata handoff preview; it does not inspect video, create sessions or publish. Missing members or CEO roster drift fail validation. Existing account budgets are reported, not changed. Dispatch is disabled until scoped connectivity, cancellation and the approved $1/task and $10/month integration limits are enforced.
+
+### Analysis-to-crew dispatcher
+
+```sh
+npm run crew:configure
+npm run crew:watch
+# Explicitly process one already-completed game for an integration test:
+npm run crew:watch -- --game GAME_ID
+```
+
+Configuration creates dedicated versions on the **existing six agent IDs**, then restores each agent's normal default. It preserves budgets and records a private recovery journal under `data/naive/crew-versions.json`. The integration coordinator pins the dedicated member versions. These versions deny external tools and publishing; only the CEO can delegate to its roster. A partially applied update is recovered on the next configure run, with version checks to avoid overwriting concurrent changes.
+
+The dispatcher runs alongside FastAPI, reads its loopback API, and processes newly completed analyses automatically. First startup skips existing completed games unless `--game` explicitly selects one. It never submits video or starts GPU inference. Only registered source/job-matched, decoded, QA-passed clip metadata is sent to Naive. No names, source URLs, media bytes or tracking IDs are sent. All five specialists participate through waited delegation under one **$1 aggregate root-session cap**. Local SQLite reservations limit dispatcher allocation to **$9 per UTC month**, leaving $1 of the approved $10 for onboarding/diagnostics. This does not cap unrelated company activity or replace server-side billing controls.
+
+The output is an evidence-constrained selection of existing clips plus generic captions, reasons and limitations. This metadata-only stage cannot recognize specific basketball events or establish player identity. Discovery/VLM preprocessing, arbitrary new clip rendering, public publishing and main-dashboard integration are not implemented by this dispatcher.
+
+State and costs survive restarts in `data/naive/analysis-workflows.sqlite3`. Request bodies and idempotency keys are stable across uncertain create responses; no new workflow is created for the same job. Outstanding reservations are retained until remote costs/cancellation are reconciled. Completed output is withheld if evidence changes, any specialist fails, or cancellation wins.
+
+The sidecar listens on **127.0.0.1:8011**:
+
+- `GET /health`
+- `GET /workflows` — results, source/job IDs, session links, member statuses and recorded costs
+- `POST /workflows/JOB_ID/cancel` with `X-PlayLattice-Local: 1` and no Origin header — optional cancellation during agent work
+
+Cancelling/superseding the local analysis is also detected. The existing UI's CV cancel button does not yet control agent work after CV completes; use the sidecar cancellation route for this stage. Keep the dispatcher process running for automatic completion handoffs; stopping it preserves queued/running work for restart.
