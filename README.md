@@ -77,6 +77,8 @@ The current backend suite has 183 passing tests. UI readability was checked in d
 
 ## Further reading
 
+- **[Developer handoff and next priorities](docs/HANDOFF.md)**
+
 - [Local setup and operation](docs/LOCAL_PROTOTYPE.md)
 - [Unified player and ball analysis](docs/UNIFIED_ANALYSIS.md)
 - [Camera cuts and gameplay review](docs/CAMERA_SHOTS.md)
