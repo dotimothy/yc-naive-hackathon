@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type RefObject } from 'react';
 import type { BallObject } from './BasketballPanel';
-import type { CameraShot, Clip, Game, TrackSample } from './types';
+import type { CameraShot, Clip, Game, Keypoint, TrackSample } from './types';
 
 /** Overlay only shows a sampled frame if it is at most this far before the playhead. */
 export const SAMPLE_WINDOW_MS = 400;
@@ -58,6 +58,50 @@ export function nearestPriorSample(times: number[], tMs: number): number | null 
   return tMs - times[found] <= SAMPLE_WINDOW_MS ? times[found] : null;
 }
 
+export type OverlayFrame = {
+  samples: TrackSample[];
+  /** Model sample time shown (the prior sample when interpolating). */
+  sampleTime: number | null;
+  /** Next model sample used for interpolation, if any. */
+  nextTime: number | null;
+};
+
+const lerp = (a: number, b: number, f: number) => a + (b - a) * f;
+
+function lerpSample(a: TrackSample, b: TrackSample, f: number): TrackSample {
+  const bk = new Map(b.keypoints.map((k) => [k.name, k]));
+  const keypoints: Keypoint[] = a.keypoints.map((k) => {
+    const q = bk.get(k.name);
+    if (!q || k.visibility <= 0 || q.visibility <= 0) return f < 0.5 || !q ? k : q;
+    return { name: k.name, x: lerp(k.x, q.x, f), y: lerp(k.y, q.y, f), visibility: Math.min(k.visibility, q.visibility) };
+  });
+  const bbox = a.bbox.map((v, i) => lerp(v, b.bbox[i], f)) as TrackSample['bbox'];
+  return { ...a, bbox, keypoints, confidence: Math.min(a.confidence, b.confidence) };
+}
+
+/**
+ * Track samples to draw at the playhead. With `interpolate`, each track's box and
+ * pose are linearly blended between the model samples bracketing the playhead
+ * (display smoothing only; nothing new is inferred). Otherwise the prior sample is held.
+ */
+export function overlayAt(index: FrameIndex, tMs: number, interpolate: boolean, allow: (t: number) => boolean = () => true): OverlayFrame {
+  const sampleTime = nearestPriorSample(index.times, tMs);
+  if (sampleTime === null || !allow(sampleTime)) return { samples: [], sampleTime: null, nextTime: null };
+  const prior = index.byTime.get(sampleTime) ?? [];
+  const pos = index.times.indexOf(sampleTime);
+  const nextTime = index.times[pos + 1];
+  if (!interpolate || sampleTime === tMs || nextTime === undefined || nextTime - sampleTime > SAMPLE_WINDOW_MS || !allow(nextTime)) {
+    return { samples: prior, sampleTime, nextTime: null };
+  }
+  const next = new Map((index.byTime.get(nextTime) ?? []).map((s) => [s.track_id, s]));
+  const f = (tMs - sampleTime) / (nextTime - sampleTime);
+  const samples = prior.map((s) => {
+    const n = next.get(s.track_id);
+    return n ? lerpSample(s, n, f) : s;
+  });
+  return { samples, sampleTime, nextTime };
+}
+
 export function trackColor(id: string): string {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
@@ -78,29 +122,41 @@ export function usePlayhead(videoRef: RefObject<HTMLVideoElement | null>): numbe
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+    // Prefer requestVideoFrameCallback: its mediaTime is the timestamp of the frame
+    // actually composited, so the overlay matches what is on screen. currentTime
+    // read on requestAnimationFrame can run a frame or more ahead/behind.
+    const rvfc = typeof video.requestVideoFrameCallback === 'function';
     let frame = 0;
     const read = () => setMs(Math.round(video.currentTime * 1000));
+    const cancel = () => {
+      if (rvfc) video.cancelVideoFrameCallback(frame);
+      else cancelAnimationFrame(frame);
+    };
     const loop = () => {
       read();
       frame = requestAnimationFrame(loop);
     };
+    const onFrame = (_now: number, meta: VideoFrameCallbackMetadata) => {
+      setMs(Math.round(meta.mediaTime * 1000));
+      frame = video.requestVideoFrameCallback(onFrame);
+    };
     const play = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(loop);
+      cancel();
+      frame = rvfc ? video.requestVideoFrameCallback(onFrame) : requestAnimationFrame(loop);
     };
     const stop = () => {
-      cancelAnimationFrame(frame);
+      cancel();
       read();
     };
     video.addEventListener('play', play);
     video.addEventListener('pause', stop);
     video.addEventListener('ended', stop);
     video.addEventListener('seeked', read);
-    video.addEventListener('timeupdate', read);
+    if (!rvfc) video.addEventListener('timeupdate', read);
     video.addEventListener('loadedmetadata', read);
     if (!video.paused) play();
     return () => {
-      cancelAnimationFrame(frame);
+      cancel();
       video.removeEventListener('play', play);
       video.removeEventListener('pause', stop);
       video.removeEventListener('ended', stop);
@@ -119,21 +175,25 @@ type PlayerProps = {
   index: FrameIndex;
   showBoxes: boolean;
   showPose: boolean;
+  showFootDot: boolean;
+  interpolate: boolean;
   objects?: BallObject[];
   shots?: CameraShot[];
   selectedTrack: string | null;
 };
 
-export function FilmPlayer({ game, videoRef, playheadMs, index, showBoxes, showPose, selectedTrack, objects = [], shots = [] }: PlayerProps) {
+export function FilmPlayer({ game, videoRef, playheadMs, index, showBoxes, showPose, showFootDot, interpolate, selectedTrack, objects = [], shots = [] }: PlayerProps) {
   const [videoError, setVideoError] = useState<string | null>(null);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const W = game.width || natural?.w || 16;
   const H = game.height || natural?.h || 9;
   const currentShot = shots.find(s => s.start_ms <= playheadMs && playheadMs < s.end_ms);
   const inCurrentShot = (t: number | null) => t !== null && (!shots.length || !!currentShot && currentShot.start_ms <= t && t < currentShot.end_ms);
-  const priorSample = nearestPriorSample(index.times, playheadMs);
-  const sampleTime = inCurrentShot(priorSample) ? priorSample : null;
-  const samples = sampleTime === null ? [] : index.byTime.get(sampleTime) ?? [];
+  // Never draw, or interpolate toward, a sample from a different camera shot.
+  const { samples, sampleTime, nextTime } = useMemo(
+    () => overlayAt(index, playheadMs, interpolate, (t) => inCurrentShot(t)),
+    [index, playheadMs, interpolate, currentShot?.start_ms, currentShot?.end_ms, shots.length],
+  );
   const visible = selectedTrack ? samples.filter((s) => s.track_id === selectedTrack) : samples;
   const objectIndex = useMemo(() => { const times = [...new Set(objects.map(o => o.timestamp_ms))].sort((a,b) => a-b); const byTime = new Map<number, BallObject[]>(); for (const o of objects) byTime.set(o.timestamp_ms, [...(byTime.get(o.timestamp_ms) ?? []), o]); return { times, byTime }; }, [objects]);
   const objectTime = nearestPriorSample(objectIndex.times, playheadMs);
@@ -192,6 +252,10 @@ export function FilmPlayer({ game, videoRef, playheadMs, index, showBoxes, showP
                     )}
                   </>
                 )}
+                {showFootDot && (
+                  // Ground point: bottom-center of the box, roughly where the player stands.
+                  <circle cx={(x + w / 2) * W} cy={(y + h) * H} r={H * 0.007} fill={color} stroke="#0b0d10" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+                )}
               </g>
             );
           })}
@@ -203,7 +267,11 @@ export function FilmPlayer({ game, videoRef, playheadMs, index, showBoxes, showP
               ? index.times.length
                 ? `no sample within ${SAMPLE_WINDOW_MS} ms before playhead`
                 : 'no track samples yet'
-              : `sample @ ${formatMs(sampleTime)} (−${playheadMs - sampleTime} ms) · ${visible.length} box${visible.length === 1 ? '' : 'es'}`}
+              : `${
+                  nextTime !== null
+                    ? `interpolated ${formatMs(sampleTime)}→${formatMs(nextTime)}`
+                    : `sample @ ${formatMs(sampleTime)} (−${playheadMs - sampleTime} ms)`
+                } · ${visible.length} box${visible.length === 1 ? '' : 'es'}`}
           </span>
         </div>
         {videoError && <div className="stage-error">{videoError}</div>}

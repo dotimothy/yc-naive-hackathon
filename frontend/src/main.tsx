@@ -13,6 +13,57 @@ import './styles.css';
 
 const errorText = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback);
 
+// Latest analysis job per game, for the library badges. `null` = never analyzed.
+type LibraryStatus = Record<string, Job | null>;
+
+function useLibraryStatus(games: Game[] | null): LibraryStatus {
+  const [status, setStatus] = useState<LibraryStatus>({});
+  const ids = (games ?? []).map((g) => g.game_id).join(',');
+  const anyActive = Object.values(status).some((j) => !!j && !isTerminal(j));
+
+  useEffect(() => {
+    if (!ids) return;
+    const ctrl = new AbortController();
+    const refresh = async () => {
+      const entries = await Promise.all(
+        ids.split(',').map(async (id) => {
+          try {
+            const jobs = await api.listJobs(id, ctrl.signal);
+            return [id, jobs[jobs.length - 1] ?? null] as const;
+          } catch {
+            return null; // keep the previous badge on a transient error
+          }
+        }),
+      );
+      if (ctrl.signal.aborted) return;
+      setStatus((prev) => {
+        const next = { ...prev };
+        for (const e of entries) if (e) next[e[0]] = e[1];
+        return next;
+      });
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), anyActive ? 3000 : 15000);
+    return () => {
+      ctrl.abort();
+      window.clearInterval(timer);
+    };
+  }, [ids, anyActive]);
+
+  return status;
+}
+
+function libraryBadge(job: Job | null | undefined): { cls: string; text: string } {
+  if (job === undefined) return { cls: 'none', text: 'checking…' };
+  if (job === null) return { cls: 'none', text: 'not analyzed' };
+  if (job.status === 'succeeded') return { cls: 'succeeded', text: 'processed' };
+  if (job.status === 'running') return { cls: 'running', text: `processing · ${job.phase}` };
+  if (job.status === 'queued') return { cls: 'queued', text: 'waiting' };
+  if (job.status === 'cancelling') return { cls: 'queued', text: 'cancelling' };
+  if (job.status === 'cancelled') return { cls: 'none', text: 'cancelled' };
+  return { cls: 'failed', text: 'failed' };
+}
+
 function App() {
   const [games, setGames] = useState<Game[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
@@ -40,6 +91,13 @@ function App() {
   };
 
   const selected = games?.find((g) => g.game_id === selectedId) ?? null;
+  const library = useLibraryStatus(games);
+  const jobsKnown = Object.values(library);
+  const counts = {
+    done: jobsKnown.filter((j) => j?.status === 'succeeded').length,
+    running: jobsKnown.filter((j) => j?.status === 'running').length,
+    waiting: jobsKnown.filter((j) => j?.status === 'queued').length,
+  };
 
   return (
     <div className="app">
@@ -74,11 +132,21 @@ function App() {
             ) : games.length === 0 ? (
               <p className="muted small">No games yet. Upload an authorized MP4 or load the sample.</p>
             ) : (
+              <>
+              <p className="library-summary small">
+                <span className="ok">{counts.done} processed</span> · <span className="info">{counts.running} processing</span> · <span>{counts.waiting} waiting</span>
+              </p>
               <ul className="game-list">
                 {[...games].reverse().map((g) => (
                   <li key={g.game_id}>
                     <button className={g.game_id === selectedId ? 'game active' : 'game'} onClick={() => setSelectedId(g.game_id)}>
-                      <strong>{g.title}</strong>
+                      <div className="game-title">
+                        <strong>{g.title}</strong>
+                        {(() => {
+                          const b = libraryBadge(library[g.game_id]);
+                          return <em className={`status ${b.cls}`}>{b.text}</em>;
+                        })()}
+                      </div>
                       <span>
                         {g.sport} · {formatMs(g.duration_ms)} · {g.width}×{g.height} · {Number(g.fps).toFixed(2)} fps
                       </span>
@@ -86,6 +154,7 @@ function App() {
                   </li>
                 ))}
               </ul>
+              </>
             )}
           </section>
         </aside>
@@ -194,6 +263,8 @@ function GameRoom({ game }: { game: Game }) {
   const [highlightsRevision, setHighlightsRevision] = useState(0);
   const [showBoxes, setShowBoxes] = useState(true);
   const [showPose, setShowPose] = useState(true);
+  const [showFootDot, setShowFootDot] = useState(true);
+  const [interpolate, setInterpolate] = useState(true);
   const [selectedTrack, setSelectedTrack] = useState<string | null>(null);
 
   const index = useMemo(() => buildFrameIndex(room.tracks), [room.tracks]);
@@ -296,12 +367,14 @@ function GameRoom({ game }: { game: Game }) {
       <div id="room-panel-film" role="tabpanel" aria-labelledby="room-tab-film" hidden={tab !== 'film'}>
       <div className="room-grid">
         <section className="panel film">
-          <FilmPlayer game={game} videoRef={videoRef} playheadMs={playheadMs} index={index} showBoxes={showBoxes} showPose={showPose} selectedTrack={selectedTrack} objects={showObjects ? ballObjects : []} shots={shotSegments} />
+          <FilmPlayer game={game} videoRef={videoRef} playheadMs={playheadMs} index={index} showBoxes={showBoxes} showPose={showPose} showFootDot={showFootDot} interpolate={interpolate} selectedTrack={selectedTrack} objects={showObjects ? ballObjects : []} shots={shotSegments} />
           <div className="controls">
             {active && <button className="secondary small danger" onClick={() => void room.cancelAnalysis()} disabled={room.cancelling || job?.status === 'cancelling'}>{room.cancelling || job?.status === 'cancelling' ? 'Cancelling…' : 'Cancel Analysis'}</button>}
             <label className="toggle"><input type="checkbox" checked={showObjects} onChange={e => setShowObjects(e.target.checked)} /> Ball / hoop</label>
             <label className="toggle"><input type="checkbox" checked={showBoxes} onChange={(e) => setShowBoxes(e.target.checked)} /> Boxes</label>
             <label className="toggle"><input type="checkbox" checked={showPose} onChange={(e) => setShowPose(e.target.checked)} /> Pose (COCO-17)</label>
+            <label className="toggle"><input type="checkbox" checked={showFootDot} onChange={(e) => setShowFootDot(e.target.checked)} /> Foot dot</label>
+            <label className="toggle" title="Blend boxes/pose between model samples so they follow the video between sampled frames. Display smoothing only."><input type="checkbox" checked={interpolate} onChange={(e) => setInterpolate(e.target.checked)} /> Interpolate between samples</label>
             <label className="select">
               Track
               <select value={selectedTrack ?? ''} onChange={(e) => setSelectedTrack(e.target.value || null)} disabled={!index.trackIds.length}>
