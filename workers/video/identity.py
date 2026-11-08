@@ -42,12 +42,36 @@ def footpoint(box):
 
 
 class PlayerIdentityTracker:
-    """One instance per full source game; retains all identity prototypes until EOF."""
+    """One instance per full source game; retains all identity prototypes until EOF.
 
-    def __init__(self, game_id, short_gap_ms=2000, margin=0.12):
+    EXPERIMENTAL, opt-in. With ``continuity=True`` a raw track that keeps feeding
+    the same provisional player stays with that player unless there is contrary
+    evidence: a strong uniform-colour contradiction (``split_distance``;
+    same-person uniform distances on development footage stayed below 0.49) or
+    an implausible jump. Colour similarity is never used as positive identity
+    for a continued track. New or fragmented raw tracks still go through the
+    conservative re-identification below, which holds ties as ``ambiguous``.
+
+    ``continuity=False`` (default) keeps the original v1 behaviour. On held-out
+    TrackID3x3 clips v2 cut final-player ID switches 144 -> 56 but raised
+    contaminated observations 18 -> 76, because it inherits raw-track swaps; it
+    is therefore not the default. See docs/TRACKING_HANDOFF.md.
+    """
+
+    def __init__(
+        self,
+        game_id,
+        short_gap_ms=2000,
+        margin=0.12,
+        continuity=False,
+        split_distance=0.6,
+    ):
         self.game_id = game_id
         self.short_gap_ms = short_gap_ms
         self.margin = margin
+        self.continuity = continuity
+        self.split_distance = split_distance
+        self.continuity_splits = 0
         self.players = {}
         self.bindings = {}
         self.segments = {}
@@ -85,6 +109,25 @@ class PlayerIdentityTracker:
             return None
         return 0.15 + 0.65 * distance / 0.035
 
+    def _continues(self, track, box, descriptor, timestamp):
+        """Player still owned by this raw track, or None if there is contrary evidence."""
+        pid = self.bindings.get(track)
+        player = self.players.get(pid)
+        if player is None or player.get("track") != track:
+            return None
+        gap = timestamp - player["last_ms"]
+        if gap <= 0 or gap > self.short_gap_ms:
+            return None
+        scale = max(12.0, (player["box"][3] - player["box"][1] + box[3] - box[1]) / 2)
+        jump = float(np.linalg.norm(footpoint(box) - player["point"])) / scale
+        distance = appearance_distance(player["descriptor"], descriptor)
+        if jump > 1.0 + 2.0 * min(gap / 1000, 2) or (
+            distance is not None and distance >= self.split_distance
+        ):
+            self.continuity_splits += 1
+            return None
+        return pid
+
     def update(self, track_ids, boxes, descriptors, timestamp_ms):
         if timestamp_ms <= self.last_timestamp:
             raise ValueError("Identity observations must arrive in source-time order")
@@ -100,12 +143,24 @@ class PlayerIdentityTracker:
             else descriptor
             for i, (box, descriptor) in enumerate(zip(boxes, descriptors))
         ]
-        keys = list(self.players)
-        costs = np.full((len(keys), len(boxes)), 100.0, dtype=float)
-        for row, pid in enumerate(keys):
+        continued = {}
+        if self.continuity:
             for col, (track, box, descriptor) in enumerate(
                 zip(track_ids, boxes, descriptors)
             ):
+                pid = self._continues(str(track), box, descriptor, timestamp_ms)
+                if pid is not None and pid not in continued.values():
+                    continued[col] = pid
+        keys = list(self.players)
+        costs = np.full((len(keys), len(boxes)), 100.0, dtype=float)
+        for row, pid in enumerate(keys):
+            if pid in continued.values():
+                continue  # visible elsewhere in this frame: cannot be anyone else
+            for col, (track, box, descriptor) in enumerate(
+                zip(track_ids, boxes, descriptors)
+            ):
+                if col in continued:
+                    continue
                 value = self._cost(
                     self.players[pid],
                     box,
@@ -116,11 +171,16 @@ class PlayerIdentityTracker:
                 if value is not None:
                     costs[row, col] = value
         proposals = {}
-        if keys:
+        for col, pid in continued.items():
+            value = self._cost(
+                self.players[pid], boxes[col], descriptors[col], timestamp_ms, True
+            )
+            proposals[col] = (pid, value, "continued")
+        if keys and len(continued) < len(boxes):
             rows, cols = linear_sum_assignment(costs)
             for row, col in zip(rows, cols):
                 value = costs[row, col]
-                if value >= 0.72:
+                if value >= 0.72 or col in continued:
                     continue
                 # Ambiguity is assessed in both directions, including simultaneous
                 # same-uniform people. A binding bonus alone cannot resolve a tie.
@@ -175,7 +235,9 @@ class PlayerIdentityTracker:
                 pid, cost, status = assignment
                 if status == "reidentified":
                     self.reconnections += 1
-                confidence = round(1 - cost, 4)
+                # A continued track may lack a motion/appearance cost (e.g. after a
+                # turn); its confidence is then unknown rather than invented.
+                confidence = None if cost is None else round(1 - cost, 4)
             else:
                 pid = self.game_id + "-player-" + str(self.next_id)
                 label = "Player " + str(self.next_id)
@@ -218,6 +280,7 @@ class PlayerIdentityTracker:
                 box=np.asarray(box, dtype=float),
                 last_ms=timestamp_ms,
                 observations=player["observations"] + 1,
+                track=track,
             )
             self.bindings[track] = pid
             results.append(
@@ -237,8 +300,11 @@ class PlayerIdentityTracker:
 
     def summary(self):
         return dict(
-            method="uniform-colour-motion-v1",
+            method="track-continuity-v2"
+            if self.continuity
+            else "uniform-colour-motion-v1",
             players=len(self.players),
+            continuity_splits=self.continuity_splits,
             reconnections=self.reconnections,
             ambiguous_observations=self.ambiguous_observations,
             identity_confirmed=False,
