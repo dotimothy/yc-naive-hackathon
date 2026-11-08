@@ -9,6 +9,8 @@ const DASH = '—';
 const EVIDENCE_PAGE = 8;
 
 const EVIDENCE_LABEL: Record<string, string> = {
+  pass: 'Completed pass',
+  possession: 'Possession',
   made_shot: 'Made FG',
   missed_shot: 'Missed FG',
   made_free_throw: 'Made FT',
@@ -20,9 +22,11 @@ const EVIDENCE_LABEL: Record<string, string> = {
   turnover: 'Turnover',
 };
 
-type MetricKey = 'fg' | 'ft' | 'pts' | 'ast' | 'reb' | 'stl' | 'blk' | 'to';
+type MetricKey = 'pass' | 'possession' | 'fg' | 'ft' | 'pts' | 'ast' | 'reb' | 'stl' | 'blk' | 'to';
 
 const METRIC_EVENTS: Record<MetricKey, string[]> = {
+  pass: ['pass'],
+  possession: ['possession'],
   fg: ['made_shot', 'missed_shot'],
   ft: ['made_free_throw', 'missed_free_throw'],
   pts: ['made_shot', 'made_free_throw'],
@@ -34,6 +38,8 @@ const METRIC_EVENTS: Record<MetricKey, string[]> = {
 };
 
 const METRIC_NAME: Record<MetricKey, string> = {
+  pass: 'Passes',
+  possession: 'Possession time',
   fg: 'Field goals',
   ft: 'Free throws',
   pts: 'Points',
@@ -53,7 +59,7 @@ function shooting(made: number, att: number): { value: string; sub: string } {
   return { value: `${made}/${att}`, sub: `${Math.round((made / att) * 100)}% of reviewed` };
 }
 
-function statCells(s: BasketballStats | null | undefined): Cell[] {
+export function statCells(s: BasketballStats | null | undefined): Cell[] {
   const live = !!s?.has_evidence;
   const count = (n: unknown) => (live ? String(num(n)) : DASH);
   const fg = live ? shooting(num(s!.field_goals_made), num(s!.field_goals_attempted)) : { value: DASH, sub: '' };
@@ -74,6 +80,17 @@ function statCells(s: BasketballStats | null | undefined): Cell[] {
     { key: 'stl', label: 'STL', value: count(s?.steals) },
     { key: 'blk', label: 'BLK', value: count(s?.blocks) },
     { key: 'to', label: 'TO', value: count(s?.turnovers) },
+  ];
+}
+
+/** Short-clip activity uses reviewed events; visibility is never ball possession. */
+export function clipStatCells(s: BasketballStats | null | undefined): Cell[] {
+  const detailed = statCells(s);
+  return [
+    { key: 'possession', label: 'Possession', value: typeof s?.possession_ms === 'number' ? `${(s.possession_ms / 1000).toFixed(1)}s` : DASH, sub: 'Reviewed ball-control intervals' },
+    { key: 'pass', label: 'Passes', value: typeof s?.passes === 'number' ? String(s.passes) : DASH, sub: 'Reviewed completed passes' },
+    { ...detailed.find(c => c.key === 'fg')!, label: 'Shots', sub: 'Made / attempted · reviewed' },
+    { ...detailed.find(c => c.key === 'reb')!, label: 'Rebounds' },
   ];
 }
 
@@ -175,7 +192,7 @@ export function PlayerStatsCard(props: {
       ) : (
         <>
           <div className="hl-statline" role="group" aria-label={`Reviewed basketball stat line for ${p.label}`}>
-            {statCells(stats).map((c) => {
+            {clipStatCells(stats).map((c) => {
               const support = stats.has_evidence ? evidenceFor(c.key).length : 0;
               return (
                 <button
@@ -194,6 +211,7 @@ export function PlayerStatsCard(props: {
               );
             })}
           </div>
+          <details><summary>More reviewed stats</summary><dl className="metrics">{statCells(stats).map(c => <div key={c.key}><dt>{c.label}</dt><dd>{c.value}</dd></div>)}</dl></details>
           <p className="hl-sample small">
             {stats.has_evidence ? (
               <>
@@ -223,7 +241,7 @@ export function PlayerStatsCard(props: {
                 {shown.slice(0, limit).map((e) => (
                   <li key={`${e.candidate_id}:${e.event_type}:${e.event_time_ms}`}>
                     <button type="button" className="ghost small" onClick={() => onSeek(e.event_time_ms, String(e.track_id))} title="Seek film to the source event and focus its track">
-                      ▶ {formatMs(e.event_time_ms)}
+                      ▶ {formatMs(e.event_time_ms)}{e.possession_end_ms != null ? ` – ${formatMs(e.possession_end_ms)}` : ''}
                     </button>
                     <span>{EVIDENCE_LABEL[e.event_type] ?? e.event_type.replace(/_/g, ' ')}</span>
                     {e.event_type === 'made_shot' && <span className="muted">{e.points === null ? 'value unknown' : `+${e.points}`}</span>}
@@ -237,7 +255,7 @@ export function PlayerStatsCard(props: {
               </ul>
               {shown.length > limit && (
                 <button type="button" className="link" onClick={() => setLimit((n) => n + EVIDENCE_PAGE)}>
-                  Show {Math.min(EVIDENCE_PAGE, shown.length - limit)} more
+                  Show {Math.min(EVIDENCE_PAGE, shown.length - limit)} More
                 </button>
               )}
             </div>
@@ -276,10 +294,10 @@ export function PlayerStatsCard(props: {
         <div><dt>Selected for render</dt><dd>{p.selected_count}</dd></div>
       </dl>
       <div className="hl-card-actions">
-        <button className="secondary small" onClick={onFilter}>{active ? 'Show all candidates' : 'Review candidates'}</button>
+        <button className="secondary small" onClick={onFilter}>{active ? 'Show All Candidates' : 'Review Candidates'}</button>
         {onGroup && (
           <button className="ghost small" onClick={onGroup} disabled={!canGroup} title="Add these track IDs to the group form">
-            Add to group form
+            Add to Group Form
           </button>
         )}
       </div>

@@ -1,0 +1,34 @@
+{
+  "name": "playlattice-naive-integration",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "naive": "naive",
+    "doctor": "tsx src/doctor.ts",
+    "smoke:local": "tsx src/local-smoke.ts",
+    "typecheck": "tsc --noEmit",
+    "monitor": "tsx src/monitor.ts",
+    "onboard": "tsx src/onboard.ts",
+    "smoke:naive": "tsx src/smoke-naive.ts",
+    "test": "tsx --test src/*.test.ts",
+    "login": "python3 scripts/login.py",
+    "session:inspect": "tsx src/inspect-session.ts",
+    "crew:check": "tsx src/crew-check.ts",
+    "crew:configure": "tsx src/crew-configure.ts",
+    "crew:watch": "tsx src/analysis-dispatcher.ts",
+    "publish:test": "tsx src/publish-test.ts",
+    "crew:autonomy": "tsx src/crew-autonomy.ts",
+    "publish:watch": "tsx src/publish-watch.ts",
+    "discovery:daily": "tsx src/daily-discovery.ts"
+  },
+  "dependencies": {
+    "@usenaive-sdk/managed-agents": "0.12.3"
+  },
+  "devDependencies": {
+    "@usenaive-sdk/cli": "1.0.3",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "@types/node": "26.0.0"
+  }
+}

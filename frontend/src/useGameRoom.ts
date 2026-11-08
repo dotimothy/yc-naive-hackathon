@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { api, ApiError } from './api';
-import type { Clip, Envelope, GameEvent, Job, TrackSample } from './types';
+import type { AnalysisProgress, Clip, Envelope, GameEvent, Job, TrackSample } from './types';
 
 export type StreamState = 'connecting' | 'live' | 'reconnecting' | 'closed';
 
-const TERMINAL = new Set(['succeeded', 'failed']);
+const TERMINAL = new Set(['succeeded', 'failed', 'cancelled']);
 export const isTerminal = (job?: Job | null) => !!job && TERMINAL.has(job.status);
 
-type Progress = { processed_frames?: number; source_timestamp_ms: number };
+type Progress = AnalysisProgress;
 
 type RoomState = {
   jobs: Job[];
@@ -49,6 +49,10 @@ function clearedOutputs(state: RoomState, activeJobId: string | null, attempt: n
 function upsertJob(state: RoomState, job: Job): RoomState {
   const index = state.jobs.findIndex((j) => j.job_id === job.job_id);
   const existing = index >= 0 ? state.jobs[index] : undefined;
+  // Cancellation is sticky: historical success/failure batches cannot resurrect this attempt.
+  if (existing?.status === 'cancelled' && job.attempts <= existing.attempts) return state;
+  if (existing?.status === 'cancelling' && (job.status === 'running' || job.status === 'queued') && job.attempts <= existing.attempts) return state;
+  if (job.status === 'cancelling' || job.status === 'cancelled') job = { ...job, report: null };
   // Replayed history can deliver stale non-terminal updates after a fetched terminal state.
   if (existing && isTerminal(existing) && !isTerminal(job) && job.attempts <= existing.attempts) return state;
   if (existing && existing.attempts > job.attempts) return state;
@@ -61,13 +65,22 @@ function upsertJob(state: RoomState, job: Job): RoomState {
     // A retry replaces the job's materialized output on the backend.
     next = clearedOutputs(next, job.job_id, job.attempts);
   }
+  if (job.job_id === next.activeJobId && (job.status === 'cancelling' || job.status === 'cancelled')) {
+    next = clearedOutputs(next, next.activeJobId, next.attempt);
+  }
   return next;
 }
 
 function reducer(state: RoomState, action: Action): RoomState {
   switch (action.type) {
     case 'refreshed': {
-      const latest = action.jobs[action.jobs.length - 1] ?? null;
+      const fetchedJobs = action.jobs.map(job => {
+        const previous = state.jobs.find(j => j.job_id === job.job_id);
+        if (previous?.status === 'cancelled' && job.attempts <= previous.attempts) return previous;
+        if (previous?.status === 'cancelling' && (job.status === 'queued' || job.status === 'running') && job.attempts <= previous.attempts) return previous;
+        return job.status === 'cancelled' || job.status === 'cancelling' ? { ...job, report: null } : job;
+      });
+      const latest = fetchedJobs[fetchedJobs.length - 1] ?? null;
       const latestId = latest?.job_id ?? null;
       const sameScope = latestId === state.activeJobId && (latest?.attempts ?? 0) === state.attempt;
       const tracks = new Map<string, TrackSample>();
@@ -78,18 +91,19 @@ function reducer(state: RoomState, action: Action): RoomState {
       for (const c of action.clips) clips[c.clip_id] = c;
       const events: Record<string, GameEvent> = {};
       for (const e of action.events) events[e.event_id] = e;
-      const known = new Set(action.jobs.map((j) => j.job_id));
+      const known = new Set(fetchedJobs.map((j) => j.job_id));
       // Keep any job seen on the stream that the list request did not yet include.
-      const jobs = [...action.jobs, ...state.jobs.filter((j) => !known.has(j.job_id))];
+      const jobs = [...fetchedJobs, ...state.jobs.filter((j) => !known.has(j.job_id))];
+      const cancelled = latest?.status === 'cancelled' || latest?.status === 'cancelling';
       return {
         ...state,
         jobs,
         activeJobId: jobs[jobs.length - 1]?.job_id ?? null,
         attempt: latest?.attempts ?? 0,
-        tracks,
-        clips,
-        events,
-        progress: sameScope ? state.progress : null,
+        tracks: cancelled ? new Map() : tracks,
+        clips: cancelled ? {} : clips,
+        events: cancelled ? {} : events,
+        progress: sameScope && !cancelled ? state.progress : null,
         loaded: true,
       };
     }
@@ -101,7 +115,15 @@ function reducer(state: RoomState, action: Action): RoomState {
       if (env.kind === 'audit.created' || env.kind === 'highlights.updated') return state;
       if (!env.job_id || env.job_id !== state.activeJobId) return { ...state, ignored: state.ignored + 1 };
       // Completed-job snapshots include reviewer corrections; historical raw batches must not undo them.
+      if (['cancelling', 'cancelled'].includes(state.jobs.find(j => j.job_id === state.activeJobId)?.status ?? '')) return state;
       if (state.loaded && isTerminal(state.jobs.find(j => j.job_id === state.activeJobId))) return { ...state, ignored: state.ignored + 1 };
+      if (env.kind === 'analysis.progress') {
+        const attempt = env.payload.attempt ?? state.attempt;
+        if (attempt < state.attempt) return { ...state, ignored: state.ignored + 1 };
+        const base = attempt > state.attempt ? clearedOutputs(state, state.activeJobId, attempt) : state;
+        if (base.progress && env.payload.source_timestamp_ms < base.progress.source_timestamp_ms) return base;
+        return { ...base, progress: { ...base.progress, ...env.payload } };
+      }
       if (env.kind === 'tracks.batch') {
         const attempt = env.payload.attempt ?? state.attempt;
         if (attempt < state.attempt) return { ...state, ignored: state.ignored + 1 };
@@ -110,7 +132,7 @@ function reducer(state: RoomState, action: Action): RoomState {
         for (const s of env.payload.items) tracks.set(sampleKey(s), s);
         const progress =
           !base.progress || env.payload.source_timestamp_ms >= base.progress.source_timestamp_ms
-            ? { processed_frames: env.payload.processed_frames, source_timestamp_ms: env.payload.source_timestamp_ms }
+            ? { ...base.progress, processed_frames: env.payload.processed_frames, source_timestamp_ms: env.payload.source_timestamp_ms }
             : base.progress;
         return { ...base, tracks, progress };
       }
@@ -138,6 +160,9 @@ export function useGameRoom(gameId: string) {
   const [refreshing, setRefreshing] = useState(false);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const cancelAbort = useRef<AbortController | null>(null);
   const [delays, setDelays] = useState<number[]>([]);
   const pendingKey = useRef<string | null>(null);
   const refreshAbort = useRef<AbortController | null>(null);
@@ -197,6 +222,7 @@ export function useGameRoom(gameId: string) {
       window.clearTimeout(correctionTimer);
       source.close();
       refreshAbort.current?.abort();
+      cancelAbort.current?.abort();
     };
   }, [gameId, refresh]);
 
@@ -213,7 +239,7 @@ export function useGameRoom(gameId: string) {
 
   // Fallback polling by job ID while the stream is down and a job is active.
   useEffect(() => {
-    if (streamState === 'live' || !activeJob || isTerminal(activeJob)) return;
+    if ((streamState === 'live' && activeJob?.status !== 'cancelling') || !activeJob || isTerminal(activeJob)) return;
     const id = activeJob.job_id;
     const timer = window.setInterval(() => {
       api.getJob(id).then((job) => dispatch({ type: 'job', job })).catch(() => undefined);
@@ -224,6 +250,7 @@ export function useGameRoom(gameId: string) {
   const startAnalysis = useCallback(async () => {
     setStarting(true);
     setStartError(null);
+    setCancelError(null);
     // Reuse the key if the previous attempt never got a response (safe retry).
     pendingKey.current ??= newKey();
     try {
@@ -238,6 +265,25 @@ export function useGameRoom(gameId: string) {
       setStarting(false);
     }
   }, [gameId]);
+
+  const cancelAnalysis = useCallback(async () => {
+    if (!activeJob || isTerminal(activeJob) || activeJob.status === 'cancelling' || cancelling) return;
+    const controller = new AbortController();
+    cancelAbort.current?.abort();
+    cancelAbort.current = controller;
+    setCancelling(true);
+    setCancelError(null);
+    try {
+      const job = await api.cancelAnalysis(activeJob.job_id, controller.signal);
+      if (controller.signal.aborted) return;
+      dispatch({ type: 'job', job });
+      if (isTerminal(job)) void refresh();
+    } catch (error) {
+      if (!controller.signal.aborted) setCancelError(error instanceof ApiError ? error.message : 'Could not cancel analysis');
+    } finally {
+      if (cancelAbort.current === controller && !controller.signal.aborted) setCancelling(false);
+    }
+  }, [activeJob, cancelling, refresh]);
 
   let delayStats: DelayStats = null;
   if (delays.length) {
@@ -255,6 +301,9 @@ export function useGameRoom(gameId: string) {
     starting,
     startError,
     startAnalysis,
+    cancelling,
+    cancelError,
+    cancelAnalysis,
     delayStats,
   };
 }

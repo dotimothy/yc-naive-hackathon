@@ -3,6 +3,8 @@
 from collections import Counter
 
 BASKETBALL_EVENTS = {
+    "pass",
+    "possession",
     "made_shot",
     "missed_shot",
     "made_free_throw",
@@ -61,6 +63,17 @@ def attach_basketball_stats(bundle):
                     )
                 )
                 continue
+            if review.get("event_type") == "possession" and not (
+                isinstance(review.get("possession_end_ms"), int)
+                and timestamp < review["possession_end_ms"] <= candidate["end_ms"]
+            ):
+                held.append(
+                    dict(
+                        candidate_id=candidate["candidate_id"],
+                        reason="Confirm the possession end time inside the source range",
+                    )
+                )
+                continue
             accepted.append((timestamp, candidate))
         evidence = []
         seen = set()
@@ -83,7 +96,11 @@ def attach_basketball_stats(bundle):
                 e["event_type"] == event and abs(e["event_time_ms"] - timestamp) < 1500
                 for e in evidence
             )
-            if close and not review.get("distinct_event_confirmed"):
+            if (
+                close
+                and event != "possession"
+                and not review.get("distinct_event_confirmed")
+            ):
                 held.append(
                     dict(
                         candidate_id=candidate["candidate_id"],
@@ -104,12 +121,25 @@ def attach_basketball_stats(bundle):
                     candidate_id=candidate["candidate_id"],
                     event_type=event,
                     event_time_ms=timestamp,
+                    possession_end_ms=review.get("possession_end_ms")
+                    if event == "possession"
+                    else None,
                     points=points,
                     track_id=candidate["track_id"],
                     clip_uri=candidate.get("clip_uri"),
                 )
             )
         counts = Counter(e["event_type"] for e in evidence)
+        intervals = sorted(
+            (e["event_time_ms"], e["possession_end_ms"])
+            for e in evidence
+            if e["event_type"] == "possession"
+        )
+        possession_ms = 0
+        previous_end = -1
+        for start, end in intervals:
+            possession_ms += max(0, end - max(start, previous_end))
+            previous_end = max(previous_end, end)
         unvalued = sum(
             e["event_type"] == "made_shot" and e["points"] is None for e in evidence
         )
@@ -117,6 +147,8 @@ def attach_basketball_stats(bundle):
             scope="reviewed_events",
             has_evidence=bool(evidence),
             reviewed_events_count=len(evidence),
+            passes=counts["pass"] if counts["pass"] else None,
+            possession_ms=possession_ms if intervals else None,
             field_goals_made=counts["made_shot"],
             field_goals_attempted=counts["made_shot"] + counts["missed_shot"],
             free_throws_made=counts["made_free_throw"],

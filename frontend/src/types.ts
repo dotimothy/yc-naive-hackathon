@@ -14,9 +14,11 @@ export type Game = {
   frame_count?: number;
   codec?: string;
   sample?: boolean;
+  analysis_job_id?: string;
+  analysis_error?: string | null;
 };
 
-export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed';
+export type JobStatus = 'queued' | 'running' | 'cancelling' | 'cancelled' | 'succeeded' | 'failed';
 
 export type IdentityMergeSuggestion = {
   track_id: string; timestamp_ms: number; status: 'needs_review'; requires_review: true;
@@ -24,7 +26,20 @@ export type IdentityMergeSuggestion = {
   excluded_candidates?: { player_id: string; reason: string }[];
 };
 
+export type ShotReviewDecision = 'gameplay' | 'non_gameplay' | 'pending';
+export type CameraShot = {
+  shot_id: string;
+  start_ms: number;
+  end_ms: number;
+  category: 'gameplay_candidate' | 'non_gameplay_candidate' | 'uncertain';
+  review_status: 'pending' | 'confirmed_gameplay' | 'confirmed_non_gameplay';
+  reasons?: string[];
+  requires_review: boolean;
+};
+export type ShotSegments = { job_id: string | null; items: CameraShot[]; status?: string };
+
 export type JobReport = {
+  automatic_output?: { status: 'clips_ready' | 'no_eligible_clips'; clip_count: number; requires_human_action: false; reason: string };
   device?: string;
   execution_mode?: string;
   precision?: string;
@@ -46,6 +61,7 @@ export type JobReport = {
   role_flags?: unknown[] | Record<string, unknown> | null;
   merge_proposals?: unknown[] | null;
   identity_merge_suggestions?: IdentityMergeSuggestion[];
+  shots?: CameraShot[];
 };
 
 export type Artifact = { artifact_id: string; kind: string; uri: string; sha256: string };
@@ -58,10 +74,10 @@ export type Job = {
   attempts: number;
   error: string | null;
   artifacts?: Artifact[];
-  report?: JobReport;
+  report?: JobReport | null;
 };
 
-export type Keypoint = { name: string; x: number; y: number; visibility: number };
+export type Keypoint = { name: string; x: number; y: number; visibility: number; confidence?: number };
 
 /** Anonymous colour grouping by first appearance — never a real team or a confirmed fact. */
 export type TeamLabel = 'Team A' | 'Team B' | 'unknown';
@@ -69,6 +85,8 @@ export type TeamLabel = 'Team A' | 'Team B' | 'unknown';
 export type RoleStatus = 'likely_non_player' | 'review_required' | 'unknown';
 
 export type TrackSample = {
+  shot_id?: string;
+  shot_start_ms?: number;
   team_label?: TeamLabel | null;
   role_status?: RoleStatus | null;
   player_id?: string;
@@ -128,6 +146,7 @@ export type GameEvent = {
 export type Envelope =
   | EnvelopeOf<'job.updated', Job>
   | EnvelopeOf<'tracks.batch', TracksBatch>
+  | EnvelopeOf<'analysis.progress', AnalysisProgress>
   | EnvelopeOf<'clip.updated', Clip>
   | EnvelopeOf<'event.created', GameEvent>
   | EnvelopeOf<'audit.created', unknown>
@@ -140,6 +159,14 @@ type EnvelopeOf<K extends string, P> = {
   job_id: string | null;
   payload: P;
   server_timestamp_ms: number;
+};
+
+export type AnalysisProgress = {
+  processed_frames?: number;
+  basketball_processed_frames?: number;
+  source_timestamp_ms: number;
+  source_frame?: number;
+  attempt?: number;
 };
 
 export type TracksBatch = {
@@ -157,6 +184,8 @@ export type Items<T> = { items: T[] };
 export type HighlightStatus = 'not_generated' | 'queued' | 'running' | 'succeeded' | 'failed';
 export type HighlightReviewStatus = 'pending' | 'approved' | 'rejected';
 export type HighlightEventType =
+  | 'pass'
+  | 'possession'
   | 'visual_activity'
   | 'made_shot'
   | 'missed_shot'
@@ -174,6 +203,7 @@ export type CandidateReview = {
   event_type?: HighlightEventType;
   /** Actual source event time; start_ms <= t < end_ms. */
   event_time_ms?: number | null;
+  possession_end_ms?: number | null;
   /** Only for made_shot (field goal); null = value unknown. */
   points?: 1 | 2 | 3 | null;
   actor_confirmed?: boolean;
@@ -184,6 +214,7 @@ export type ReviewRequest = {
   decision: HighlightReviewStatus;
   event_type: HighlightEventType;
   event_time_ms?: number | null;
+  possession_end_ms?: number | null;
   points?: 1 | 2 | 3 | null;
   actor_confirmed?: boolean;
   distinct_event_confirmed?: boolean;
@@ -193,6 +224,7 @@ export type StatEvidence = {
   candidate_id: string;
   event_type: string;
   event_time_ms: number;
+  possession_end_ms?: number | null;
   points: number | null;
   track_id: string;
   clip_uri: string | null;
@@ -201,6 +233,8 @@ export type StatEvidence = {
 /** Counts within reviewed evidence only — not full-game official totals. */
 export type BasketballStats = {
   scope: 'reviewed_events';
+  passes?: number | null;
+  possession_ms?: number | null;
   has_evidence: boolean;
   reviewed_events_count: number;
   field_goals_made: number;

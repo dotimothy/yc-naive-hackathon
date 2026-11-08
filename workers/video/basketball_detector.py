@@ -2,6 +2,9 @@
 
 import hashlib
 import json
+import logging
+import os
+import time
 from pathlib import Path
 import cv2
 import torch
@@ -21,6 +24,7 @@ class BasketballDetector:
         ball_confidence=0.25,
         hoop_confidence=0.35,
         tiled=True,
+        precision=None,
     ):
         if not (0 < ball_confidence <= 1 and 0 < hoop_confidence <= 1):
             raise ValueError("Confidence thresholds must be in (0,1]")
@@ -50,6 +54,30 @@ class BasketballDetector:
             device="cuda" if self.device.startswith("cuda") else self.device,
             resolution=704,
         )
+        requested = precision or os.environ.get("SCOUTFILM_BALL_PRECISION", "auto")
+        if requested not in ("auto", "float16", "float32"):
+            raise ValueError("Ball precision must be auto, float16 or float32")
+        self.inference_runtime = dict(
+            requested_precision=requested,
+            precision="float32",
+            optimized=False,
+            compiled=False,
+            optimization_seconds=0.0,
+            fallback_reason=None,
+        )
+        # Validated on MPS. CPU and unbenchmarked CUDA retain their existing default.
+        if requested == "float16" or (requested == "auto" and self.device == "mps"):
+            before = time.perf_counter()
+            try:
+                # RF-DETR 1.3's traced detection export includes a None mask.
+                # Eager export supports both one-view and three-view inputs.
+                self.model.optimize_for_inference(compile=False, dtype=torch.float16)
+                self.inference_runtime.update(precision="float16", optimized=True)
+            except Exception as exc:
+                self._fallback_to_float32(exc)
+            self.inference_runtime["optimization_seconds"] = (
+                time.perf_counter() - before
+            )
         self.thresholds = {
             "basketball": ball_confidence,
             "hoop": hoop_confidence,
@@ -57,6 +85,13 @@ class BasketballDetector:
             "referee": 0.5,
         }
         self.tiled = tiled
+
+    def _fallback_to_float32(self, exc):
+        self.model.remove_optimized_model()
+        self.inference_runtime.update(
+            precision="float32", optimized=False, fallback_reason=type(exc).__name__
+        )
+        logging.warning("RF-DETR float16 failed; using float32: %s", exc)
 
     def detect(self, frame, timestamp_ms):
         h, w = frame.shape[:2]
@@ -69,7 +104,17 @@ class BasketballDetector:
             for x1, y1, x2, y2 in views
         ]
         synchronize(self.device)
-        results = self.model.predict(images, threshold=min(self.thresholds.values()))
+        try:
+            results = self.model.predict(
+                images, threshold=min(self.thresholds.values())
+            )
+        except Exception as exc:
+            if not getattr(self, "inference_runtime", {}).get("optimized"):
+                raise
+            self._fallback_to_float32(exc)
+            results = self.model.predict(
+                images, threshold=min(self.thresholds.values())
+            )
         synchronize(self.device)
         if not isinstance(results, list):
             results = [results]

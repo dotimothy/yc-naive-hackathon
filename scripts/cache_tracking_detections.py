@@ -28,7 +28,7 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from workers.video.runtime import infer, load_model, select_device  # noqa: E402
+from workers.video.runtime import infer, select_device  # noqa: E402
 
 OUT = ROOT / "data" / "claude_tracking"
 GT_DIR = ROOT / "data" / "trackid3x3" / "ground_truth" / "Indoor" / "MOT"
@@ -109,6 +109,48 @@ def fetch(name, spec, manifest):
         license="CC BY 4.0, TrackID3x3 (Yamada et al.), pinned repo 9822a3dd",
     )
     return target
+
+
+def load_legacy_model(device):
+    """Reproduce historical R-CNN caches; production uses YOLO26 Nano pose."""
+    from torchvision.models.detection import (
+        keypointrcnn_resnet50_fpn,
+        KeypointRCNN_ResNet50_FPN_Weights,
+    )
+
+    model = (
+        keypointrcnn_resnet50_fpn(
+            weights=KeypointRCNN_ResNet50_FPN_Weights.COCO_V1,
+            min_size=480,
+            max_size=854,
+            box_detections_per_img=30,
+        )
+        .eval()
+        .to("cpu" if device == "mps" else device)
+    )
+    if device == "mps":
+
+        class Stage(torch.nn.Module):
+            def __init__(self, module):
+                super().__init__()
+                self.module = module.to("mps")
+
+            def forward(self, x):
+                out = self.module(x.to("mps"))
+                return (
+                    {k: v.cpu() for k, v in out.items()}
+                    if isinstance(out, dict)
+                    else out.cpu()
+                )
+
+        model.backbone = Stage(model.backbone)
+        model.roi_heads.keypoint_head = Stage(
+            torch.nn.Sequential(
+                model.roi_heads.keypoint_head, model.roi_heads.keypoint_predictor
+            )
+        )
+        model.roi_heads.keypoint_predictor = torch.nn.Identity()
+    return model
 
 
 def detect(name, video, model, device):
@@ -222,7 +264,7 @@ def main():
                 print(name, "cached")
                 continue
             if model is None:
-                model = load_model(device)
+                model = load_legacy_model(device)
                 model.roi_heads.score_thresh = CONFIDENCE
             started = time.perf_counter()
             report = detect(name, video, model, device)

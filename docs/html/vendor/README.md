@@ -1,0 +1,1 @@
+hls.js 1.7.4 light UMD build, BSD-2-Clause. Source: https://github.com/video-dev/hls.js . Retrieved from the pinned npm distribution on 2026-11-08. SHA-256: 482cccb3a224554f64d8c2cf0d335dba4a3819bdb726afbfddfe15de4c277d82. See hls.LICENSE. Bundled locally for reliable playback without a third-party script request.

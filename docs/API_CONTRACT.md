@@ -4,7 +4,7 @@ Proposed local interface, to be implemented. FastAPI/Pydantic models will be can
 
 ## First implementation status
 
-The local API implements the video/job/track/clip subset plus game listing, sample loading and game job listing. Profiles currently return an empty list. The remaining profile/consent workflow is planned. Additional implemented analysis options: `stride` (1–20, default 5), `confidence` (0.1–0.99, default 0.75), and optional `device` (`auto`, `cpu`, `mps`, `cuda`, `cuda:N`; default runtime policy). Unavailable explicit devices return 422 before a job is queued. Reports include actual device/execution mode and synchronized timing. Sample court polygons are manually supplied game metadata.
+The local API implements the video/job/track/clip subset plus game listing, sample loading and game job listing. Profiles return an empty list and are deferred beyond autonomous Phase 1. Additional implemented analysis options: `stride` (1–20, default 5), `confidence` (0.1–0.99, default 0.25), and optional `device` (`auto`, `cpu`, `mps`, `cuda`, `cuda:N`; default runtime policy). Unavailable explicit devices return 422 before a job is queued. Reports include actual device/execution mode and synchronized timing. Sample court polygons are manually supplied game metadata.
 
 Current deviations from the initial proposal: pose points expose `visibility` rather than an invented calibrated confidence; default segment origin is `review_window` and events remain unverified. SSE adds `server_timestamp_ms` for transport-delay measurement. Transient retries restart the whole job (max three executions) rather than resuming a phase; interrupted jobs fail explicitly on API restart. API validation errors use FastAPI’s `detail` shape. These limits must remain visible until their implementations change.
 
@@ -69,3 +69,39 @@ Tracking metadata optionally adds anonymous `team_label` (`Team A`, `Team B`, `u
 Reports contain detection coverage, stable hoop proposals, trajectory candidates, measured device/wall time and analyzed source scope. Made/missed outcomes remain unknown. `POST .../basketball/candidates/{candidate_id}/review` imports a pending highlight proposal only after a reviewer selects a current track and explicitly confirms the actor. Parent analysis and identity correction revision must match. Importing does not approve an outcome or add a statistic.
 
 Production identity uses `reconnection="review"`: cross-track and long-gap links become `identity_merge_suggestions` in the job report, never automatic merges. Each suggestion includes its fragment `track_id`, source `timestamp_ms`, ranked `candidates` (`player_id`, label, `track_ids`, matching cost, gap), and excluded simultaneous alternatives. The UI offers unselected pairings that load the existing reviewer group form; saving requires explicit confirmation. Historical evaluator variants explicitly use `reconnection="automatic"` for comparison. See `docs/IDENTITY_REVIEW_HANDOFF.md` for validation and remaining errors.
+
+### Unified analysis update
+
+Analyze Footage now coordinates both models in one decoded source pass; `POST .../analyze` defaults to `basketball:true`, `ball_stride:2` alongside player `stride:5`. The former separate `POST .../basketball` is retired (410). Its GET/report/object and proposal-review routes remain. Unified ball jobs use the parent analysis ID as `run_id`; live object responses include parent/run scope. `analysis.progress` SSE carries common source milliseconds, player `processed_frames` and `basketball_processed_frames`. Reports expose `analysis_mode:"shared_decoder"`, `retrieved_frames`, `basketball_status`, and the final basketball report. Optional setup absence is `unavailable`; detector errors are explicit partial failures, with no outcome attribution. See [unified analysis](UNIFIED_ANALYSIS.md) for runtime, protocol, measured performance and limits.
+
+### YOLO26 Nano pose model
+
+New analyses default to `ultralytics/yolo26n-pose`, input size1280, confidence0.25 and NMS-free end-to-end inference. These thresholds are model-specific; old persisted R-CNN reports and cached tracks are unchanged. Reports record `pose_model_manifest` (official release/hash/license), `pose_image_size`, `pose_confidence_threshold`, `pose_end_to_end` and `keypoint_visibility_threshold`. `execution_mode:"mps"` denotes native MPS inference; the old hybrid path is retired from production. Decode/letterboxing/output serialization still use CPU. The worker disables MPS fallback and Ultralytics online telemetry.
+
+Track keypoints retain normalized `x`, `y`, integer `visibility` (YOLO score>=0.5), and optionally raw uncalibrated `confidence`. The legacy COCO-17 joint order and boxes contract are preserved. Native MPS/CPU smoke runs and frozen detector/identity comparisons are documented in `docs/YOLO26_POSE_VALIDATION.md`. That comparison found materially lower player coverage, so reviewer attribution remains required.
+
+### Analysis cancellation
+
+`POST /api/jobs/{id}/cancel` cancels a queued or running analysis. Running work transitions through `cancelling` until the worker stops, then `cancelled`; queued work becomes `cancelled` without starting inference. Repeated requests are idempotent, and completed/failed jobs are unchanged. Cancelling still owns the active timeline until termination, so a replacement cannot race the old worker.
+
+A durable per-job marker survives restart. The coordinated worker checks every250ms and kills/reaps its isolated process group (including render subprocesses); the in-process fallback checks between operations. No automatic retries occur after cancellation. Partial tracks, basketball observations, highlights, reports, events and generated clip registrations are cleared. The uploaded source and other jobs remain intact. Cancelled state is terminal and historical stream replay cannot restore old outputs. The UI offers Cancel Analysis beside both the main action and video controls; a cancelled video can be re-run with a new request key.
+
+### Camera shots and gameplay categories
+
+`GET /api/games/{game_id}/shots` returns current `{job_id,status,items}`. Items include string `shot_id`, source `start_ms/end_ms`, raw `category` (`gameplay_candidate`, `non_gameplay_candidate`, `uncertain`), evidence/reasons and `review_status` (`pending`, `confirmed_gameplay`, `confirmed_non_gameplay`). PUT `.../shots/{shot_id}/review` accepts `{job_id,decision:gameplay|non_gameplay|pending}`. POST `.../shots/{shot_id}/clip` accepts `{job_id}` and returns a cached, source-verified camera-shot clip. The original upload is retained. See [camera shots](CAMERA_SHOTS.md).
+
+Worker `shots.updated` carries live ranges. New track and object samples add `shot_id`; tracker IDs are scoped across camera changes. Highlight/ball candidates and rendered clips are bounded by shots. Unknown/non-gameplay categories require reviewer gameplay confirmation before automatic selection. This is a provisional visual-view classifier, not an official game-event or athlete-identity classifier.
+
+### Autonomous Phase 1 input and output (authoritative closeout scope)
+
+The user's latest requirement supersedes the earlier private-profile/outreach milestone: an authorized video submission must run analysis and generate outputs without human intervention between input and output. Optional correction/review tools remain available, but do not gate automatic analysis or visual-activity clips. Profiles, roster verification, consent-management UI and outreach simulation are deferred from Phase 1. No unverified player/event labels become verified stats automatically.
+
+`POST /api/games` accepts optional multipart `auto_analyze` (default false for backwards-compatible API uploads). The UI always submits `auto_analyze=true`; the server durably queues the default unified analysis before returning the game plus `analysis_job_id`. No client-side effect or second Analyze click is required. `POST /api/games/sample?auto_analyze=true` does the same for sample input, reusing an existing active/succeeded sample job to avoid duplicate work. Explicit reanalysis remains an optional user action.
+
+Queueing failures preserve the uploaded source/game and surface a durable `analysis_error` rather than deleting registered media or implying completed analysis. Running jobs retain bounded retries and terminal failure/cancellation outputs. Automatic output labels remain provisional; insufficient evidence can yield fewer/no eligible highlights with explanatory evidence, never a request for human approval or fabricated attribution.
+
+### Video thumbnails
+
+`GET /api/games/{game_id}/thumbnail` returns a cached 480×270 JPEG from the registered source at an early interior timestamp. Aspect ratio is preserved with padding; no inference runs. The cache is keyed by immutable source hash and render profile, with private one-day HTTP caching. Unknown games/missing sources return 404; unavailable decoding returns 503. Generation uses at most two single-threaded FFmpeg processes and a 20-second timeout. Callers cannot supply filesystem paths. The Game Library lazy-loads stills and shows a neutral video placeholder on failure.
+
+`GET /api/library/status` returns compact latest-job badges for visible games as `{items:[{game_id,job_id,status,phase}]}`. Reports, tracks and filesystem paths are excluded. The library reads one batch instead of requesting every game's full history, and pauses badge polling while the Naive Crew view is open.

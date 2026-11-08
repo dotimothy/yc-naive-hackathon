@@ -59,8 +59,15 @@ def bundle_for(game, job):
             raise
     samples = s.corrected_samples(job["job_id"])
     stride = job.get("options", {}).get("stride", 5)
+    from backend.app.shot_routes import effective_shots
+
     return build_highlights(
-        samples, game["duration_ms"], game["fps"], stride, job["job_id"]
+        samples,
+        game["duration_ms"],
+        game["fps"],
+        stride,
+        job["job_id"],
+        shots=effective_shots(job["job_id"]),
     )
 
 
@@ -190,6 +197,8 @@ def generate_highlights(
 class Review(BaseModel):
     decision: Literal["approved", "rejected", "pending"]
     event_type: Literal[
+        "pass",
+        "possession",
         "visual_activity",
         "made_shot",
         "missed_shot",
@@ -202,6 +211,7 @@ class Review(BaseModel):
         "turnover",
     ] = "visual_activity"
     event_time_ms: Optional[int] = Field(default=None, ge=0)
+    possession_end_ms: Optional[int] = Field(default=None, ge=0)
     points: Optional[Literal[1, 2, 3]] = None
     actor_confirmed: bool = False
     distinct_event_confirmed: bool = False
@@ -222,6 +232,22 @@ def review_candidate(game_id: str, candidate_id: str, body: Review):
         if body.decision != "approved" and body.event_type != "visual_activity":
             raise HTTPException(422, "Basketball outcomes require an approved review")
         if body.decision == "approved":
+            if body.event_type == "possession" and not (
+                body.event_time_ms is not None
+                and body.possession_end_ms is not None
+                and candidate["start_ms"]
+                <= body.event_time_ms
+                < body.possession_end_ms
+                <= candidate["end_ms"]
+            ):
+                raise HTTPException(
+                    422,
+                    "Possession needs start and end times inside the candidate source range",
+                )
+            if body.event_type != "possession" and body.possession_end_ms is not None:
+                raise HTTPException(
+                    422, "Possession end time only applies to possession intervals"
+                )
             if (
                 body.event_time_ms is not None
                 and not candidate["start_ms"]
@@ -395,6 +421,7 @@ def change_splits(game_id, body=None):
             id,
             max_clips=bundle["max_clips"],
             top_per_player=bundle["top_per_player"],
+            shots=bundle.get("shots"),
         )
         fresh["identity_revision"] = revision
         s.put("highlights", id, fresh)

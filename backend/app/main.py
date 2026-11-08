@@ -20,10 +20,16 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 from workers.render.media import probe, sha256
-from workers.video.pipeline import process_video
-from workers.video.runtime import available_devices, select_device
+from workers.video.cancellation import MARKER, check_cancelled
+from workers.video.coordinated import run_analysis as process_video
+from workers.video.runtime import available_devices, select_device, POSE_MODEL
 from backend.app.highlight_routes import router as highlight_router, public_highlights
 from backend.app.basketball_routes import router as basketball_router
+from backend.app.shot_routes import router as shot_router
+from backend.app.thumbnail_routes import router as thumbnail_router
+from backend.app.library_routes import router as library_router
+from backend.app.naive_routes import router as naive_router
+from backend.app.mail_preview_routes import router as mail_preview_router
 from workers.video.sports.basketball import OUTDOOR_SAMPLE_COURT
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -127,6 +133,7 @@ def output_emitter(game_id, id, attempt):
     game = get("game", game_id)
 
     def emit(kind, payload):
+        check_cancelled(DATA / "processed" / id / MARKER)
         if kind == "phase":
             set_job(id, phase=payload["phase"])
         elif kind == "tracks.batch":
@@ -137,6 +144,51 @@ def output_emitter(game_id, id, attempt):
                 id + ":" + str(payload["source_frame"]),
                 dict(job_id=id, game_id=game_id, **payload),
             )
+            update(game_id, id, kind, payload)
+        elif kind == "analysis.progress":
+            payload["attempt"] = attempt
+            update(game_id, id, kind, payload)
+        elif kind in ("basketball.updated", "basketball.batch"):
+            try:
+                current = get("basketball_job", id)
+            except HTTPException:
+                current = dict(
+                    run_id=id,
+                    game_id=game_id,
+                    parent_job_id=id,
+                    identity_revision=identity_revision(id),
+                    integrated=True,
+                    created_at=time.time(),
+                    source_sha256=game["source_sha256"],
+                    output_dir=str(DATA / "processed" / id / "basketball"),
+                    status="running",
+                    error=None,
+                    report=None,
+                )
+            if kind == "basketball.batch":
+                put(
+                    "basketball_batch",
+                    id + ":" + str(payload["processed_frames"]),
+                    dict(job_id=id, attempt=attempt, **payload),
+                )
+                report = current.get("report") or {}
+                report.update(
+                    processed_frames=payload["processed_frames"],
+                    frames_with_ball=payload["frames_with_ball"],
+                    analyzed_until_ms=payload["source_timestamp_ms"],
+                )
+                for timing in ("elapsed_seconds", "detector_seconds"):
+                    if timing in payload:
+                        report[timing] = payload[timing]
+                current["report"] = report
+            else:
+                current.update(payload)
+            put("basketball_job", id, current)
+            from backend.app.basketball_routes import public
+
+            update(game_id, id, "basketball.updated", public(current))
+        elif kind == "shots.updated":
+            put("shots", id, dict(job_id=id, **payload))
             update(game_id, id, kind, payload)
         elif kind == "tracks.enriched":
             put("track_metadata", id, dict(job_id=id, **payload))
@@ -173,12 +225,64 @@ def output_emitter(game_id, id, attempt):
     return emit
 
 
+def finish_cancellation(id):
+    """Only publish terminal cancellation after the worker stops and outputs are hidden."""
+    with LOCK:
+        job = get("job", id)
+        with connect() as db:
+            for row in db.execute(
+                "SELECT kind,id,value FROM records WHERE kind IN ('batch','clip','event','highlights','track_metadata','basketball_batch','report','shots')"
+            ).fetchall():
+                value = json.loads(row["value"])
+                if value.get("job_id") == id or (
+                    row["kind"] == "report" and row["id"] == id
+                ):
+                    db.execute(
+                        "DELETE FROM records WHERE kind=? AND id=?",
+                        (row["kind"], row["id"]),
+                    )
+            for artifact in job.get("artifacts", []):
+                db.execute(
+                    "DELETE FROM records WHERE kind='artifact' AND id=?",
+                    (artifact["artifact_id"],),
+                )
+        for basketball in all_records("basketball_job"):
+            if basketball.get("parent_job_id") == id:
+                basketball.update(status="cancelled", report=None, error=None)
+                put("basketball_job", basketball["run_id"], basketball)
+                update(
+                    job["game_id"],
+                    id,
+                    "basketball.updated",
+                    {
+                        k: v
+                        for k, v in basketball.items()
+                        if k not in ("output_dir", "source_path", "options")
+                    },
+                )
+        set_job(
+            id,
+            status="cancelled",
+            phase="cancelled",
+            error=None,
+            report=None,
+            artifacts=[],
+        )
+        audit(job["game_id"], id, "analysis_cancelled", "cancelled", job["attempts"])
+
+
 def run_job(id):
     job = get("job", id)
     game = get("game", job["game_id"])
     game_id = game["game_id"]
     for attempt in range(1, 4):
-        set_job(id, status="running", attempts=attempt, error=None, phase="track")
+        with LOCK:
+            if get("job", id)["status"] == "cancelled":
+                return
+            if (DATA / "processed" / id / MARKER).exists():
+                finish_cancellation(id)
+                return
+            set_job(id, status="running", attempts=attempt, error=None, phase="track")
         audit(game_id, id, "analysis_started", "running", attempt)
 
         emit = output_emitter(game_id, id, attempt)
@@ -187,13 +291,17 @@ def run_job(id):
             # Each retry replaces this job's materialized output; the append-only audit retains history.
             with connect() as db:
                 for row in db.execute(
-                    "SELECT kind,id,value FROM records WHERE kind IN ('batch','clip','event','highlights','track_metadata')"
+                    "SELECT kind,id,value FROM records WHERE kind IN ('batch','clip','event','highlights','track_metadata','basketball_batch','shots')"
                 ).fetchall():
                     if json.loads(row["value"]).get("job_id") == id:
                         db.execute(
                             "DELETE FROM records WHERE kind=? AND id=?",
                             (row["kind"], row["id"]),
                         )
+            with connect() as db:
+                db.execute(
+                    "DELETE FROM records WHERE kind='basketball_job' AND id=?", (id,)
+                )
             set_job(id, artifacts=[])
             result = process_video(
                 game["path"],
@@ -205,13 +313,33 @@ def run_job(id):
             result["clips"] = [
                 {k: v for k, v in c.items() if k != "path"} for c in result["clips"]
             ]
-            put("report", id, result)
-            set_job(id, status="succeeded", phase="complete", report=result)
+            with LOCK:
+                check_cancelled(DATA / "processed" / id / MARKER)
+                put("report", id, result)
+                set_job(id, status="succeeded", phase="complete", report=result)
             audit(game_id, id, "analysis_completed", "succeeded", attempt)
             return
         except Exception as exc:
+            if (DATA / "processed" / id / MARKER).exists():
+                finish_cancellation(id)
+                return
+            for basketball in all_records("basketball_job"):
+                if (
+                    basketball.get("parent_job_id") == id
+                    and basketball.get("integrated")
+                    and basketball["status"] == "running"
+                ):
+                    basketball.update(
+                        status="failed",
+                        error="Coordinated analysis failed; re-run Analyze footage",
+                    )
+                    put("basketball_job", basketball["run_id"], basketball)
             for bundle in all_records("highlights"):
-                if bundle["job_id"] == id and bundle["status"] in ("queued", "running"):
+                if bundle["job_id"] == id and bundle["status"] in (
+                    "queued",
+                    "running",
+                    "cancelling",
+                ):
                     bundle.update(
                         status="failed",
                         error="Analysis failed during highlight generation",
@@ -242,21 +370,24 @@ async def lifespan(app):
     select_device()  # Fail startup on an unavailable explicit runtime device.
     initialize()
     for job in all_records("job"):
-        if job["status"] in ("queued", "running"):
+        if job["status"] in ("queued", "running", "cancelling"):
+            if (DATA / "processed" / job["job_id"] / MARKER).exists():
+                finish_cancellation(job["job_id"])
+                continue
             set_job(
                 job["job_id"],
                 status="failed",
                 error="Server restarted; submit analysis again with a new request key",
             )
     for bundle in all_records("highlights"):
-        if bundle["status"] in ("queued", "running"):
+        if bundle["status"] in ("queued", "running", "cancelling"):
             bundle.update(
                 status="failed",
                 error="Server restarted during highlight generation; generate again",
             )
             put("highlights", bundle["job_id"], bundle)
     for job in all_records("basketball_job"):
-        if job["status"] in ("queued", "running"):
+        if job["status"] in ("queued", "running", "cancelling"):
             job.update(
                 status="failed",
                 error="Server restarted during ball analysis; submit again",
@@ -266,6 +397,8 @@ async def lifespan(app):
 
 
 app = FastAPI(title="PlayLattice local", lifespan=lifespan)
+app.include_router(thumbnail_router)
+app.include_router(library_router)
 
 
 @app.get("/api/health")
@@ -309,7 +442,78 @@ def public_game(game):
 
 @app.get("/api/games")
 def games():
-    return {"items": [public_game(g) for g in all_records("game")]}
+    return {
+        "items": [
+            public_game(g)
+            for g in all_records("game")
+            if not g.get("removed_from_library")
+        ]
+    }
+
+
+@app.delete("/api/games/{game_id}")
+def remove_game(game_id: str):
+    with LOCK:
+        game = get("game", game_id)
+        game["removed_from_library"] = True
+        put("game", game_id, game)
+    return {"game_id": game_id, "removed": True}
+
+
+@app.post("/api/games/{game_id}/restore")
+def restore_game(game_id: str):
+    with LOCK:
+        game = get("game", game_id)
+        game.pop("removed_from_library", None)
+        put("game", game_id, game)
+    return public_game(game)
+
+
+def ingested_game(game, auto_analyze):
+    """Persist the ingest before queueing; client disconnects do not own the worker."""
+    if not auto_analyze:
+        return public_game(game)
+    with LOCK:
+        latest = latest_job_id(game["game_id"])
+        previous = get("job", latest) if latest else None
+        if previous and previous["status"] in (
+            "queued",
+            "running",
+            "cancelling",
+            "succeeded",
+        ):
+            game.pop("analysis_error", None)
+            put("game", game["game_id"], game)
+            return dict(public_game(game), analysis_job_id=latest)
+        key = "ingest:" + game["game_id"] + (":" + latest if latest else "")
+        try:
+            job = analyze(game["game_id"], Analysis(), idempotency_key=key)
+        except (HTTPException, OSError, RuntimeError) as exc:
+            # A successful upload remains accessible even if scheduling is unavailable.
+            error = (
+                exc.detail
+                if isinstance(exc, HTTPException) and isinstance(exc.detail, str)
+                else "Analysis could not start. Retry analysis from this video."
+            )
+            game["analysis_error"] = error
+            put("game", game["game_id"], game)
+            failed_id = latest_job_id(game["game_id"])
+            if failed_id and failed_id != latest:
+                failed = get("job", failed_id)
+                if failed["status"] == "queued":
+                    set_job(failed_id, status="failed", error=error)
+                    audit(
+                        game["game_id"],
+                        failed_id,
+                        "analysis_enqueue_failed",
+                        "failed",
+                        0,
+                    )
+                return dict(public_game(game), analysis_job_id=failed_id)
+            return public_game(game)
+        game.pop("analysis_error", None)
+        put("game", game["game_id"], game)
+        return dict(public_game(game), analysis_job_id=job["job_id"])
 
 
 @app.post("/api/games", status_code=201)
@@ -317,6 +521,7 @@ def upload(
     video: UploadFile = File(...),
     rights_confirmed: bool = Form(...),
     sport: str = Form("basketball"),
+    auto_analyze: bool = Form(False),
 ):
     if not rights_confirmed:
         raise HTTPException(422, "Confirm footage rights before upload")
@@ -334,42 +539,48 @@ def upload(
                 if size > 250 * 1024 * 1024:
                     raise HTTPException(413, "Use a file smaller than 250 MiB")
                 target.write(block)
-        return public_game(
-            register_game(path, Path(video.filename or "Uploaded game").name)
-        )
+        game = register_game(path, Path(video.filename or "Uploaded game").name)
     except Exception:
         path.unlink(missing_ok=True)
         raise
     finally:
         video.file.close()
+    # Do not remove registered media if analysis queueing subsequently fails.
+    return ingested_game(game, auto_analyze)
 
 
 @app.post("/api/games/sample", status_code=201)
-def sample():
+def sample(auto_analyze: bool = False):
     source = ROOT / "data/trackid3x3/outdoor_stationary_12s.mp4"
     outdoor = source.exists()
     if not outdoor:
         source = ROOT / "data/trackid3x3/basket_S1T1_pre.mp4"
     if not source.exists():
         raise HTTPException(404, "Run scripts/download_sample.py first")
-    for game in all_records("game"):
-        if game.get("sample") and game.get("sample_variant") == (
-            "outdoor" if outdoor else "indoor"
-        ):
-            return public_game(game)
-    path = DATA / (uuid.uuid4().hex + ".mp4")
-    shutil.copy2(source, path)
-    game = register_game(
-        path,
-        "TrackID3x3 · "
-        + ("outdoor full 3x3 court" if outdoor else "indoor fixed camera"),
-    )
-    game["sample"] = True
-    game["sample_variant"] = "outdoor" if outdoor else "indoor"
-    if outdoor:
-        game["court_polygon"] = OUTDOOR_SAMPLE_COURT
-    put("game", game["game_id"], game)
-    return public_game(game)
+    # Concurrent sample requests share one registered game and active/completed job.
+    with LOCK:
+        for game in all_records("game"):
+            if game.get("sample") and game.get("sample_variant") == (
+                "outdoor" if outdoor else "indoor"
+            ):
+                return ingested_game(game, auto_analyze)
+        path = DATA / (uuid.uuid4().hex + ".mp4")
+        try:
+            shutil.copy2(source, path)
+            game = register_game(
+                path,
+                "TrackID3x3 · "
+                + ("outdoor full 3x3 court" if outdoor else "indoor fixed camera"),
+            )
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
+        game["sample"] = True
+        game["sample_variant"] = "outdoor" if outdoor else "indoor"
+        if outdoor:
+            game["court_polygon"] = OUTDOOR_SAMPLE_COURT
+        put("game", game["game_id"], game)
+        return ingested_game(game, auto_analyze)
 
 
 class Cut(BaseModel):
@@ -385,11 +596,13 @@ class Cut(BaseModel):
 
 
 class Analysis(BaseModel):
+    basketball: bool = True
+    ball_stride: int = Field(default=3, ge=1, le=5)
     device: Optional[str] = Field(default=None, min_length=1, max_length=20)
     candidate_ranges: list[Cut] = Field(default_factory=list, max_length=10)
     replay_paced: bool = False
     stride: int = Field(default=5, ge=1, le=20)
-    confidence: float = Field(default=0.75, ge=0.1, le=0.99)
+    confidence: float = Field(default=0.25, ge=0.1, le=0.99)
 
 
 @app.post("/api/games/{game_id}/analyze", status_code=202)
@@ -398,6 +611,7 @@ def analyze(
 ):
     game = get("game", game_id)
     options = body.model_dump()
+    options["pose_model"] = POSE_MODEL
     try:
         select_device(options["device"])
     except ValueError as exc:
@@ -421,14 +635,15 @@ def analyze(
                 return public_job(get("job", row["job_id"]))
             if any(
                 b.get("job_id") == latest_job_id(game_id)
-                and b["status"] in ("queued", "running")
+                and b["status"] in ("queued", "running", "cancelling")
                 for b in all_records("highlights")
             ):
                 raise HTTPException(
                     409, "Wait for highlight generation before re-analysis"
                 )
             if any(
-                j["game_id"] == game_id and j["status"] in ("queued", "running")
+                j["game_id"] == game_id
+                and j["status"] in ("queued", "running", "cancelling")
                 for j in all_records("basketball_job")
             ):
                 raise HTTPException(
@@ -436,7 +651,8 @@ def analyze(
                 )
             # One active job per game prevents mixed tracking timelines.
             if any(
-                j["game_id"] == game_id and j["status"] in ("queued", "running")
+                j["game_id"] == game_id
+                and j["status"] in ("queued", "running", "cancelling")
                 for j in all_records("job")
             ):
                 raise HTTPException(409, "This game already has an active analysis")
@@ -459,6 +675,29 @@ def analyze(
         update(game_id, id, "job.updated", public_job(job))
         POOL.submit(run_job, id)
     return public_job(job)
+
+
+@app.post("/api/jobs/{id}/cancel")
+def cancel_analysis(id: str):
+    with LOCK:
+        job = get("job", id)
+        if job["status"] not in ("queued", "running"):
+            return public_job(job)
+        path = DATA / "processed" / id / MARKER
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+        if job["status"] == "queued":
+            finish_cancellation(id)
+        else:
+            set_job(id, status="cancelling", phase="cancelling", error=None)
+            audit(
+                job["game_id"],
+                id,
+                "analysis_cancel_requested",
+                "cancelling",
+                job["attempts"],
+            )
+        return public_job(get("job", id))
 
 
 @app.get("/api/jobs/{id}")
@@ -643,8 +882,11 @@ def profiles():
     return {"items": []}
 
 
+app.include_router(mail_preview_router)
+app.include_router(naive_router)
 app.include_router(highlight_router)
 app.include_router(basketball_router)
+app.include_router(shot_router)
 
 
 if (ROOT / "frontend/dist").exists():

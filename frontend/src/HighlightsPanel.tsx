@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError } from './api';
 import { formatMs, trackColor } from './FilmPlayer';
-import { PlayerStatsCard, heldReasonText } from './PlayerStatsCard';
+import { heldReasonText } from './PlayerStatsCard';
+import { PlayerHighlightsTable } from './PlayerHighlightsTable';
+import { SectionTabs } from './SectionTabs';
 import type {
   IdentityMergeSuggestion,
   HighlightBundle,
@@ -36,6 +38,8 @@ const MAX_CLIPS = { min: 1, max: 12, initial: 8 };
 const TOP_PER_PLAYER = { min: 1, max: 3, initial: 2 };
 
 export const EVENT_TYPE_LABEL: Record<HighlightEventType, string> = {
+  pass: 'Completed pass',
+  possession: 'Possession interval',
   visual_activity: 'Visual activity (no outcome)',
   made_shot: 'Made field goal',
   missed_shot: 'Missed field goal',
@@ -69,6 +73,7 @@ type ReviewDraft = {
   event_type: HighlightEventType;
   /** Seconds in source time, as typed. */
   timeSec: string;
+  endSec: string;
   points: PointsChoice;
   actorConfirmed: boolean;
   distinctConfirmed: boolean;
@@ -93,6 +98,7 @@ function initialDraft(c: HighlightCandidate): ReviewDraft {
     event_type,
     timeSec: (t / 1000).toFixed(2),
     points,
+    endSec: typeof r?.possession_end_ms === 'number' ? (r.possession_end_ms / 1000).toFixed(2) : '',
     actorConfirmed: r?.actor_confirmed === true,
     distinctConfirmed: r?.distinct_event_confirmed === true,
   };
@@ -119,6 +125,11 @@ function approvalBody(c: HighlightCandidate, d: ReviewDraft): { body?: ReviewReq
     actor_confirmed: d.actorConfirmed,
     distinct_event_confirmed: d.distinctConfirmed,
   };
+  if (d.event_type === 'possession') {
+    const end = d.endSec.trim() ? Math.round(Number(d.endSec) * 1000) : NaN;
+    if (!Number.isFinite(end) || end <= ms || end > c.end_ms) return { error: 'Enter a possession end time after the start and inside the clip.' };
+    body.possession_end_ms = end;
+  }
   if (d.event_type === 'made_shot') {
     if (!d.points) return { error: 'Choose the field goal value: 1, 2, 3 or Unknown.' };
     body.points = d.points === 'unknown' ? null : (Number(d.points) as 1 | 2 | 3);
@@ -165,9 +176,13 @@ function HighlightsPanelInner({ gameId, jobId, analysisActive, onSeek, onUpdated
   const [drafts, setDrafts] = useState<Record<string, ReviewDraft>>({});
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [playerFilter, setPlayerFilter] = useState<string | null>(null);
-  const [candidateLimit, setCandidateLimit] = useState(6);
+  const [candidatePage, setCandidatePage] = useState(0);
   const [showAllTracks, setShowAllTracks] = useState(false);
-  useEffect(() => setCandidateLimit(6), [playerFilter]);
+  const [view, setView] = useState<'players' | 'candidates' | 'identity'>('players');
+  useEffect(() => {
+    document.querySelectorAll<HTMLVideoElement>('.highlights [role="tabpanel"][hidden] video').forEach(video => video.pause());
+  }, [view]);
+  useEffect(() => setCandidatePage(0), [playerFilter]);
 
   // Group mapping form.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -470,6 +485,8 @@ function HighlightsPanelInner({ gameId, jobId, analysisActive, onSeek, onUpdated
   // ----- render -----
   const status: HighlightStatus = bundle?.status ?? 'not_generated';
   const filterPlayer = playerFilter ? playerById.get(playerFilter) : undefined;
+  const candidatePages = Math.max(1, Math.ceil(candidates.length / 3));
+  const currentCandidatePage = Math.min(candidatePage, candidatePages - 1);
 
   return (
     <section className="panel highlights">
@@ -495,7 +512,7 @@ function HighlightsPanelInner({ gameId, jobId, analysisActive, onSeek, onUpdated
           <input type="number" min={TOP_PER_PLAYER.min} max={TOP_PER_PLAYER.max} value={topPerPlayer} disabled={locked} onChange={(e) => setParam(setTopPerPlayer, TOP_PER_PLAYER)(e.target.value)} />
         </label>
         <button onClick={() => void generate()} disabled={locked || !jobId || load === 'loading'}>
-          {busy === 'generate' ? 'Submitting…' : generating ? `Generating (${status})…` : 'Generate highlights'}
+          {busy === 'generate' ? 'Submitting…' : generating ? `Generating (${status})…` : 'Generate Highlights'}
         </button>
         <span className="muted small">Reuses the latest successful tracking; no inference rerun.</span>
       </div>
@@ -531,24 +548,20 @@ function HighlightsPanelInner({ gameId, jobId, analysisActive, onSeek, onUpdated
         <p className="muted small hl-empty">Highlights unavailable.</p>
       ) : (
         <>
-          <div className="panel-head hl-section"><h4>Reviewed basketball evidence</h4><label className="toggle"><input type="checkbox" checked={showAllTracks} onChange={e => setShowAllTracks(e.target.checked)} /> Show all {players.length} track groups</label></div>
+          <SectionTabs id="highlight" label="Highlight review sections" value={view} onChange={setView} tabs={[
+            { id: 'players', label: 'Players' }, { id: 'candidates', label: 'Candidate Review' }, { id: 'identity', label: 'Identity Corrections' },
+          ]} />
+          <div id="highlight-panel-players" role="tabpanel" aria-labelledby="highlight-tab-players" hidden={view !== 'players'}>
+          <div className="panel-head hl-section"><h4>Activity in this clip</h4><label className="toggle"><input type="checkbox" checked={showAllTracks} onChange={e => setShowAllTracks(e.target.checked)} /> Show all {players.length} track groups</label></div>
           {players.length === 0 ? (
             <p className="muted small">{status === 'not_generated' ? 'No highlight analysis yet. Click Generate highlights.' : 'No track groups with enough evidence.'}</p>
           ) : (
-            <div className="hl-players">
-              {players.filter(p => showAllTracks || p.candidate_count > 0 || p.identity_confirmed || !!p.basketball_stats?.has_evidence).map((p) => (
-                <PlayerStatsCard
-                  key={p.player_id}
-                  player={p}
-                  active={playerFilter === p.player_id}
-                  onFilter={() => setPlayerFilter(playerFilter === p.player_id ? null : p.player_id)}
-                  onGroup={p.identity_confirmed ? undefined : () => addTracksToForm(p.track_ids)}
-                  canGroup={canMutate}
-                  onSeek={onSeek}
-                  candidateById={candidateById}
-                />
-              ))}
-            </div>
+            <PlayerHighlightsTable
+              players={players.filter(p => showAllTracks || p.candidate_count > 0 || p.identity_confirmed || !!p.basketball_stats?.has_evidence)}
+              activeId={playerFilter} canGroup={canMutate} candidateById={candidateById} onSeek={onSeek}
+              onReview={id => { setPlayerFilter(id); setView('candidates'); }}
+              onGroup={tracks => { addTracksToForm(tracks); setView('identity'); }}
+            />
           )}
           {!statsAvailable && players.length > 0 && (
             <p className="alert warn">Reviewed basketball stats are unavailable for this highlight data (older format). Stat lines show as unavailable; no rating is shown in their place.</p>
@@ -559,15 +572,17 @@ function HighlightsPanelInner({ gameId, jobId, analysisActive, onSeek, onUpdated
             not minutes played. Cards are ordered by amount of reviewed evidence, then confirmed groups, then observed duration.
           </p>
 
+          </div>
+          <div id="highlight-panel-candidates" role="tabpanel" aria-labelledby="highlight-tab-candidates" hidden={view !== 'candidates'}>
           <div className="panel-head hl-section">
             <h4>Candidates ({candidates.length}{filterPlayer ? ` · ${filterPlayer.label}` : ''})</h4>
-            {filterPlayer && <button className="ghost small" onClick={() => setPlayerFilter(null)}>Show all</button>}
+            {filterPlayer && <button className="ghost small" onClick={() => setPlayerFilter(null)}>Show All</button>}
           </div>
           {candidates.length === 0 ? (
             <p className="muted small">No candidates{filterPlayer ? ' for this group' : ''}.</p>
           ) : (
             <ul className="hl-cands">
-              {candidates.slice(0, candidateLimit).map((c) => (
+              {candidates.slice(currentCandidatePage * 3, currentCandidatePage * 3 + 3).map((c) => (
                 <CandidateRow
                   key={c.candidate_id}
                   candidate={c}
@@ -592,7 +607,13 @@ function HighlightsPanelInner({ gameId, jobId, analysisActive, onSeek, onUpdated
             </ul>
           )}
 
-          {candidates.length > candidateLimit && <button className="secondary small" onClick={() => setCandidateLimit(n => n + 6)}>Show more candidates ({candidates.length - candidateLimit} remaining)</button>}
+          {candidates.length > 0 && <div className="table-pagination">
+            <span>Candidates {currentCandidatePage * 3 + 1}–{Math.min((currentCandidatePage + 1) * 3, candidates.length)} of {candidates.length}</span>
+            <button className="secondary small" disabled={currentCandidatePage === 0} onClick={() => setCandidatePage(currentCandidatePage - 1)}>Previous Candidates</button>
+            <button className="secondary small" disabled={currentCandidatePage + 1 >= candidatePages} onClick={() => setCandidatePage(currentCandidatePage + 1)}>Next Candidates</button>
+          </div>}
+          </div>
+          <div id="highlight-panel-identity" role="tabpanel" aria-labelledby="highlight-tab-identity" hidden={view !== 'identity'}>
           <div className="hl-mapping">
             <h4 className="hl-section">Uncertain fragment pairings</h4>
             <p className="muted small">Possible reconnections remain separate. Check both source fragments, then choose a pairing to load into the correction form below. Saving still requires your confirmation. Costs are matching heuristics, not probabilities.</p>
@@ -600,14 +621,14 @@ function HighlightsPanelInner({ gameId, jobId, analysisActive, onSeek, onUpdated
               <summary>Review fragment suggestions ({identityMergeSuggestions.filter(s => knownTracks.has(s.track_id)).length})</summary>
               {identityMergeSuggestions.filter(s => knownTracks.has(s.track_id)).map(s => <article className="ball-candidate" key={`${s.track_id}:${s.timestamp_ms}`}>
                 <strong>T{s.track_id} at {formatMs(s.timestamp_ms)}</strong>
-                <button className="secondary small" onClick={() => onSeek(s.timestamp_ms, s.track_id)}>View fragment</button>
-                {s.candidates.filter(c => c.track_ids.every(t => knownTracks.has(t))).map(c => <button key={c.player_id} className="ghost small" disabled={!canMutate} onClick={() => { addTracksToForm([s.track_id, ...c.track_ids]); setFormError(null); }}>Review pairing with {c.player_label} · T{c.track_ids.join(', T')} · gap {(c.gap_ms/1000).toFixed(1)} s · cost {c.score.toFixed(3)}</button>)}
+                <button className="secondary small" onClick={() => onSeek(s.timestamp_ms, s.track_id)}>View Fragment</button>
+                {s.candidates.filter(c => c.track_ids.every(t => knownTracks.has(t))).map(c => <button key={c.player_id} className="ghost small" disabled={!canMutate} onClick={() => { addTracksToForm([s.track_id, ...c.track_ids]); setFormError(null); }}>Review Pairing with {c.player_label} · T{c.track_ids.join(', T')} · gap {(c.gap_ms/1000).toFixed(1)} s · cost {c.score.toFixed(3)}</button>)}
                 {!!s.excluded_candidates?.length && <span className="fineprint">{s.excluded_candidates.length} simultaneous alternatives excluded.</span>}
               </article>)}
             </details>}
             <h4 className="hl-section">Reviewer-confirmed groups</h4>
             <p className="muted small">
-              Group track fragments only when you have checked the footage and they show the same person. Labels are private and local (e.g. <code>Jersey12</code>);
+              Group track fragments only when you have checked the footage and they show the same person. Labels are private (e.g. <code>Jersey12</code>);
               nothing is inferred, published or linked to a profile. Groups reset when a new analysis runs.
             </p>
             {roster.length > 0 && (
@@ -653,7 +674,7 @@ function HighlightsPanelInner({ gameId, jobId, analysisActive, onSeek, onUpdated
               </label>
               <div className="hl-form-actions">
                 <button type="submit" className="secondary small" disabled={!canMutate || !groupConfirmed}>
-                  {busy === 'players' ? 'Saving…' : editingId ? 'Update group' : 'Save group'}
+                  {busy === 'players' ? 'Saving…' : editingId ? 'Update Group' : 'Save Group'}
                 </button>
                 {(editingId || groupLabel || groupTracks) && (
                   <button type="button" className="ghost small" onClick={resetForm}>Cancel</button>
@@ -661,6 +682,7 @@ function HighlightsPanelInner({ gameId, jobId, analysisActive, onSeek, onUpdated
               </div>
               {formError && <div className="alert error">{formError}</div>}
             </form>
+          </div>
           </div>
         </>
       )}
@@ -785,7 +807,7 @@ function CandidateRow(props: {
 
         <div className="hl-review">
           <div className="hl-cand-actions">
-            <button className="secondary small" onClick={() => props.onSeek(savedTime ?? c.action_start_ms)}>Seek source</button>
+            <button className="secondary small" onClick={() => props.onSeek(savedTime ?? c.action_start_ms)}>Seek Source</button>
             <label className="select" title="Outcome type is applied only when approving">
               Outcome if approved
               <select value={draft.event_type} onChange={(e) => props.onDraft({ event_type: e.target.value as HighlightEventType })} disabled={disabled}>
@@ -798,7 +820,7 @@ function CandidateRow(props: {
           {outcomeDraft && (
             <div className="hl-facts">
               <label className="select">
-                Event time (s)
+                {draft.event_type === 'possession' ? 'Possession start (s)' : 'Event time (s)'}
                 <input
                   type="number"
                   inputMode="decimal"
@@ -811,13 +833,14 @@ function CandidateRow(props: {
                   aria-describedby={liveBoundsError ? `t-${id}` : undefined}
                 />
               </label>
+              {draft.event_type === 'possession' && <label className="select">Possession end (s)<input type="number" step={0.01} value={draft.endSec} onChange={e => props.onDraft({ endSec: e.target.value })} disabled={disabled} /></label>}
               {props.getPlayheadMs && (
                 <button type="button" className="ghost small" disabled={disabled} onClick={() => props.onDraft({ timeSec: (props.getPlayheadMs!() / 1000).toFixed(2) })}>
-                  Use player time
+                  Use Player Time
                 </button>
               )}
               <button type="button" className="ghost small" onClick={() => draftMs !== null && props.onSeek(draftMs)} disabled={draftMs === null}>
-                Check time
+                Check Time
               </button>
               {draft.event_type === 'made_shot' && (
                 <label className="select">
@@ -854,7 +877,7 @@ function CandidateRow(props: {
           )}
           <div className="hl-cand-actions">
             <button className="small" onClick={() => props.onReview('approved')} disabled={disabled}>
-              {saving ? 'Saving…' : c.review_status === 'approved' ? 'Update approval' : 'Approve'}
+              {saving ? 'Saving…' : c.review_status === 'approved' ? 'Update Approval' : 'Approve'}
             </button>
             <button className="ghost small danger" onClick={() => props.onReview('rejected')} disabled={disabled || rejected}>Reject</button>
             <button className="ghost small" onClick={() => props.onReview('pending')} disabled={disabled || c.review_status === 'pending'}>Reset</button>

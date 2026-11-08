@@ -10,6 +10,8 @@ import type {
   ReviewRequest,
   RosterGroup,
   TrackSample,
+  ShotReviewDecision,
+  ShotSegments,
 } from './types';
 
 export class ApiError extends Error {
@@ -28,7 +30,7 @@ function detailMessage(body: unknown, status: number): string {
         .join('; ');
     }
   }
-  if (status === 0) return 'Local API unreachable. Is the backend running on 127.0.0.1:8000?';
+  if (status === 0) return 'Unable to connect. Please try again.';
   return `Request failed (HTTP ${status})`;
 }
 
@@ -56,9 +58,12 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 const enc = encodeURIComponent;
 
 export const api = {
+  removeGame: (id: string) => request(`/api/games/${enc(id)}`, { method: 'DELETE' }),
+  restoreGame: (id: string) => request<Game>(`/api/games/${enc(id)}/restore`, { method: 'POST' }),
+  libraryStatus: (signal?: AbortSignal) => request<Items<{ game_id: string; status: Job['status']; phase: string | null }>>('/api/library/status', { signal }).then(r => r.items),
   listGames: (signal?: AbortSignal) => request<Items<Game>>('/api/games', { signal }).then((r) => r.items),
 
-  loadSample: () => request<Game>('/api/games/sample', { method: 'POST' }),
+  loadSample: () => request<Game>('/api/games/sample?auto_analyze=true', { method: 'POST' }),
 
   /** Multipart upload with progress (fetch cannot report upload progress). */
   uploadGame(file: File, rightsConfirmed: boolean, onProgress?: (fraction: number) => void): Promise<Game> {
@@ -67,6 +72,7 @@ export const api = {
       form.append('video', file);
       form.append('rights_confirmed', rightsConfirmed ? 'true' : 'false');
       form.append('sport', 'basketball');
+      form.append('auto_analyze', 'true');
       const xhr = new XMLHttpRequest();
       xhr.open('POST', '/api/games');
       xhr.upload.onprogress = (e) => {
@@ -91,11 +97,14 @@ export const api = {
     request<Job>(`/api/games/${enc(gameId)}/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
-      body: JSON.stringify({ stride: 5, replay_paced: false }),
+      body: JSON.stringify({ stride: 5, confidence: 0.25, replay_paced: false }),
     }),
 
   listJobs: (gameId: string, signal?: AbortSignal) =>
     request<Items<Job>>(`/api/games/${enc(gameId)}/jobs`, { signal }).then((r) => r.items),
+
+  cancelAnalysis: (jobId: string, signal?: AbortSignal) =>
+    request<Job>(`/api/jobs/${enc(jobId)}/cancel`, { method: 'POST', signal }),
 
   getJob: (jobId: string, signal?: AbortSignal) => request<Job>(`/api/jobs/${enc(jobId)}`, { signal }),
 
@@ -107,6 +116,23 @@ export const api = {
 
   events: (gameId: string, signal?: AbortSignal) =>
     request<Items<GameEvent>>(`/api/games/${enc(gameId)}/events`, { signal }).then((r) => r.items),
+
+  shots: (gameId: string, signal?: AbortSignal) =>
+    request<ShotSegments>(`/api/games/${enc(gameId)}/shots`, { signal }),
+
+  createShotClip: (gameId: string, shotId: string, jobId: string, signal?: AbortSignal) =>
+    request<Clip>(`/api/games/${enc(gameId)}/shots/${enc(shotId)}/clip`, {
+      method: 'POST', signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ job_id: jobId }),
+    }),
+
+  reviewShot: (gameId: string, shotId: string, jobId: string, decision: ShotReviewDecision, signal?: AbortSignal) =>
+    request<ShotSegments>(`/api/games/${enc(gameId)}/shots/${enc(shotId)}/review`, {
+      method: 'PUT', signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision, job_id: jobId }),
+    }),
 
   highlights: (gameId: string, signal?: AbortSignal) =>
     request<HighlightBundle>(`/api/games/${enc(gameId)}/highlights`, { signal }),

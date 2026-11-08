@@ -13,7 +13,7 @@ Keep ingest, tracking records, clipping, jobs, consent and UI infrastructure reu
 
 1. Bootstrap FastAPI + SQLite, React/Vite/TypeScript, local media storage and a shared fixture contract.
 2. Submit one authorized basketball MP4 → probe → real player detection/pose/tracking → timestamped updates → dashboard → two rendered, verified clips.
-3. Add a private, explicitly consented roster profile, persisted jobs, bounded retries and audit evidence. Keep outreach simulated locally.
+3. Complete unattended input → analysis → verified clip outputs, persisted jobs, bounded retries and audit evidence. Private roster profiles and outreach are deferred under the user’s updated Phase 1 scope. Keep outreach simulated locally.
 4. Stop at Stage 1 until the team accepts the local demonstration. Only then add Naive orchestration; sponsor integrations follow later.
 
 Do not put cloud accounts, payment, email, hosted storage or sponsor SDKs on the prototype critical path. Do not train a custom event classifier. Use replay-paced MP4 and label it accurately. Coach-supplied time ranges are an acceptable event fallback; detection/tracking must still be real and identified as such.
@@ -41,7 +41,7 @@ Each handoff includes changed files, callable interface/run command, input/outpu
 
 Test meaningful boundaries: invalid media; time ranges; actual tracks; ffprobe validation of rendered clips; job persistence/retry; consent filtering; SSE reconnect. Run checks appropriate to changes (Python tests/lint, TypeScript typecheck/build once tooling exists). Add a CPU smoke path; GPU performance must be measured locally. Never claim tests passed unless executed.
 
-First thin-slice gate: one MP4 submission produces actual tracking updates visible in the UI and two playable source-linked clips, with exact commands and measured inference FPS/UI delay. Full Stage 1 additionally requires a consented private profile, a persisted report/audit, one injected failure with bounded retry or safe escalation, and local allowed/suppressed outreach simulation. Preserve an offline demo.
+First thin-slice gate: one MP4 submission produces actual tracking updates visible in the UI and two playable source-linked clips, with exact commands and measured inference FPS/UI delay. Full Phase 1 requires authorized input → automatic queued analysis → real tracking and source-verified highlight outputs without intervening human actions, a persisted report/audit, one injected failure with bounded retry or terminal failure output, restart persistence and a CPU smoke check. The user’s updated requirement defers profiles/roster verification/outreach simulation; optional reviews must not block this loop. Preserve an offline demo.
 
 ## Data boundaries
 

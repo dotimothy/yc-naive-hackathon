@@ -1,0 +1,6 @@
+/assets/demo-stream/*.m3u8
+  Content-Type: application/vnd.apple.mpegurl
+  Cache-Control: public, max-age=0, must-revalidate
+/assets/demo-stream/*.m4s
+  Content-Type: video/iso.segment
+  Cache-Control: public, max-age=0, must-revalidate

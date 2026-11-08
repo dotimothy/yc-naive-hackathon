@@ -27,6 +27,8 @@ function gameState(job: Job | null): GameState {
   if (!job) return { key: 'pregame', label: 'Pregame' };
   if (job.status === 'running') return { key: 'live', label: 'Analyzing' };
   if (job.status === 'queued') return { key: 'queued', label: 'Warming Up' };
+  if (job.status === 'cancelling') return { key: 'queued', label: 'Cancelling' };
+  if (job.status === 'cancelled') return { key: 'cancelled', label: 'Cancelled' };
   if (job.status === 'failed') return { key: 'failed', label: 'Failed' };
   return { key: 'final', label: 'Analyzed' };
 }
@@ -132,7 +134,7 @@ export function LiveBoard(props: {
           <div className="board-tags">
             <span className={`game-state ${state.key}`}><i />{state.label}</span>
             <span className="board-sport">{game.sport}</span>
-            <span className={`stream ${props.streamState}`} title="Live update stream from the local API"><i />{props.streamState === 'live' ? 'Feed Live' : props.streamState === 'connecting' ? 'Connecting' : props.streamState === 'reconnecting' ? 'Reconnecting' : 'Feed Closed'}</span>
+            <span className={`stream ${props.streamState}`} title="Analysis updates"><i />{props.streamState === 'live' ? 'Feed Live' : props.streamState === 'connecting' ? 'Connecting' : props.streamState === 'reconnecting' ? 'Reconnecting' : 'Feed Closed'}</span>
           </div>
           <h2>{game.title}</h2>
           <p className="board-meta">
@@ -147,7 +149,7 @@ export function LiveBoard(props: {
         <Stat label="Provisional Groups" value={onScreen.size || '–'} hint={onScreen.size ? 'distinct player / track IDs' : 'awaiting tracks'} />
         <Stat label="Detections" value={tracks.size ? tracks.size.toLocaleString() : '–'} hint="pose samples received" />
         <Stat label="Clips" value={clips.length ? `${passed}/${clips.length}` : '–'} hint="passed QA / rendered" />
-        <Stat label="Inference FPS" value={report ? report.inference_fps.toFixed(1) : '–'} hint={report ? `${report.execution_mode ?? report.device ?? 'cpu'} · measured` : 'after first run'} />
+        <Stat label="Player Inference FPS" value={report ? report.inference_fps.toFixed(1) : '–'} hint={report ? `${report.execution_mode ?? report.device ?? 'cpu'} · measured` : 'after first run'} />
         <Stat label="Feed Delay" value={props.delay ? `${props.delay.median}` : '–'} unit={props.delay ? 'ms' : undefined} hint="median, server → browser" />
       </dl>
 
@@ -164,7 +166,7 @@ export function LiveBoard(props: {
         <b>{Math.round(pct)}%<small> Film Processed</small></b>
       </div>
 
-      <div className="leaders">
+      <details className="leaders"><summary>Film Review Queue</summary>
         <div className="leaders-head">
           <h3>Film Review Queue</h3>
           <div className="seg-toggle" role="tablist">
@@ -180,6 +182,10 @@ export function LiveBoard(props: {
           <p className="leaders-empty">
             {!job
               ? 'Run analysis to fill the board. Players appear here live as tracking streams in.'
+              : job.status === 'cancelled'
+              ? 'Analysis cancelled. Run analysis again to collect evidence.'
+              : job.status === 'cancelling'
+              ? 'Stopping analysis…'
               : job.status === 'failed'
               ? 'No tracking data: the analysis failed.'
               : 'Waiting for the first tracked frames…'}
@@ -208,7 +214,7 @@ export function LiveBoard(props: {
             : 'Screen time = sampled frames where the player/track was detected × sampling interval. Not minutes played; tracks can include referees or spectators.'}{' '}
           Labels are provisional unless confirmed by a reviewer. Click a row to isolate it on film.
         </p>
-      </div>
+      </details>
     </section>
   );
 }
@@ -234,6 +240,10 @@ function useHighlightBundle(gameId: string, job: Job | null, clipCount: number, 
 
   useEffect(() => {
     const controller = new AbortController();
+    if (job?.status === 'cancelled' || job?.status === 'cancelling') {
+      setBundle(null);
+      return () => controller.abort();
+    }
     api
       .highlights(gameId, controller.signal)
       .then((b) => setBundle(b))
@@ -248,5 +258,5 @@ function useHighlightBundle(gameId: string, job: Job | null, clipCount: number, 
     return () => window.clearInterval(timer);
   }, [pending]);
 
-  return bundle;
+  return job?.status === 'cancelled' || job?.status === 'cancelling' ? null : bundle;
 }
