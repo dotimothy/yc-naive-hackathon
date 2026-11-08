@@ -2,11 +2,15 @@
 
 # PlayLattice
 
-**Autonomous sports clipping.** Turn basketball footage into source-linked highlights and portrait prediction quizzes that invite viewers to guess before the reveal.
+**Turn Every Shot Into a Conversation.**
 
-PlayLattice combines local video models, a coordinated Naive crew, and AgentMail customer conversations. Review the evidence in the Film Room, inspect agent activity in the Naive Crew dashboard, and request clip previews by email. Basketball is the first supported sport; the project was built for the YC Naive Hackathon.
+Great basketball doesn’t only happen under the spotlight. PlayLattice is an autonomous clipping engine built to help bring overlooked basketball moments—and the underrated players behind them—to more people.
 
-**[Project website](https://playlattice-project.doublename.chatgpt.site)** · **[Watch the demo](https://playlattice-project.doublename.chatgpt.site/#demo)** · [Architecture](https://playlattice-project.doublename.chatgpt.site/architecture.html) · [Email for recommendations](mailto:playlattice@agentmail.to)
+From source footage to player-focused highlights, PlayLattice combines local video analysis and a coordinated Naive agent crew to select moments, prepare captions, and create portrait prediction quizzes. Less manual editing. More opportunities to share a player’s game and invite viewers to guess, react, and keep watching.
+
+Review the evidence in the Film Room, inspect agent handoffs in the Naive Crew dashboard, and request recommendations or custom clipping previews through AgentMail. Basketball is the first supported sport; the project was built for the YC Naive Hackathon. Player labels remain provisional: PlayLattice surfaces footage for review, not player-ability rankings or verified athlete identities.
+
+**[Project website](https://playlattice-project.pages.dev)** · **[Watch the demo](https://playlattice-project.pages.dev/#demo)** · [Architecture](https://playlattice-project.pages.dev/architecture.html) · [Email for recommendations](mailto:playlattice@agentmail.to)
 
 ## See it in action
 
@@ -31,7 +35,7 @@ Follow the batch’s recorded outcomes, inspect workflow stages and agent activi
 
 ![Recorded portrait quiz showing player highlights, answer choices, countdown, and reveal](docs/html/assets/tiktok-quiz-preview.gif)
 
-*This earlier format asks viewers to predict player movement. The [current demo](https://playlattice-project.doublename.chatgpt.site/#demo) shows the newer storytelling format; the website’s make-or-miss interaction is a labeled illustration. [Original TikTok post](https://www.tiktok.com/@playlatticeai/video/7705723023252376845). Source: Singpore amatuer basketball channel, [original footage](https://www.youtube.com/watch?v=zpT8lc2vtkQ), excerpted, cropped, and overlaid with quiz graphics.*
+*This earlier format asks viewers to predict player movement. The [current demo](https://playlattice-project.pages.dev/#demo) shows the newer storytelling format; the website’s make-or-miss interaction is a labeled illustration. [Original TikTok post](https://www.tiktok.com/@playlatticeai/video/7705723023252376845). Source: Singpore amatuer basketball channel, [original footage](https://www.youtube.com/watch?v=zpT8lc2vtkQ), excerpted, cropped, and overlaid with quiz graphics.*
 
 </details>
 
@@ -55,7 +59,7 @@ The film room uses tabs for playback, players/highlights, camera shots, ball/hoo
 
 Jobs, review state and replayable updates persist in SQLite. Uploaded media, model weights and generated videos remain in ignored local storage.
 
-[Watch the two-minute demo](https://playlattice-project.doublename.chatgpt.site/#demo) · [Documentation index](docs/README.md) · [Architecture](https://playlattice-project.doublename.chatgpt.site/architecture.html)
+[Watch the two-minute demo](https://playlattice-project.pages.dev/#demo) · [Documentation index](docs/README.md) · [Architecture](https://playlattice-project.pages.dev/architecture.html)
 
 ## Run locally
 
@@ -121,7 +125,7 @@ Player scores express clip-review priority, not player ability. Official statist
 npm --prefix frontend run build
 ```
 
-The latest local verification passed 242 backend tests, 63 Naive integration tests, the integration typecheck, and the frontend build. UI readability was checked in desktop and mobile Chrome. Real-video inference and export checks are separate from unit tests; passing software checks does not establish basketball recognition accuracy.
+The latest local verification passed 243 backend tests, 63 Naive integration tests, the integration typecheck, and the frontend build. UI readability was checked in desktop and mobile Chrome. Real-video inference and export checks are separate from unit tests; passing software checks does not establish basketball recognition accuracy.
 
 ## Further reading
 
