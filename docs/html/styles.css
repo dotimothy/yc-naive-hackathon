@@ -74,3 +74,10 @@ body{font-family:var(--body)}
 .sponsor-address { display:block; font:400 12px var(--body); color:var(--muted); margin-top:7px; }
 .sponsor-section a:focus-visible { outline:2px solid var(--accent); outline-offset:6px; }
 @media(max-width:760px) { .sponsor-section { grid-template-columns:1fr; gap:30px; padding:30px 4px; } .sponsor-email { border-left:0; border-top:1px solid var(--line); padding:24px 0 0; } .sponsor-logos { gap:20px; } }
+
+.company-actions:has(.recommendation-cta) { margin-bottom:14px; }
+.hero-recommendation { margin:0 auto 26px; max-width:540px; color:var(--muted); font:400 14px/1.7 var(--body); }
+.hero-recommendation > a { display:inline-block; color:var(--text); text-underline-offset:4px; margin-top:6px; }
+.recommendation-powered { display:inline-block; color:var(--muted); font-size:11px; margin-left:14px; }
+.company-nav nav .recommendation-nav { color:var(--accent-2); }
+@media(max-width:760px) { .hero-recommendation { font-size:13px; } .recommendation-powered { display:block; margin:4px 0 0; } .company-actions .recommendation-cta { width:100%; max-width:340px; } }
