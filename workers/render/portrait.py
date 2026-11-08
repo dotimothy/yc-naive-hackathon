@@ -17,7 +17,7 @@ from PIL import Image, ImageDraw, ImageFont
 PROFILE = "player-portrait-quiz-v1"
 WIDTH, HEIGHT, FPS = 720, 1280, 30
 QUIZ_HOLD_SECONDS = 5
-VIEW_Y, VIEW_H = 112, 850
+VIEW_Y, VIEW_H = 130, 620
 
 
 def valid_box(box):
@@ -260,6 +260,7 @@ def build_plan(snapshot, max_players=6):
             break
     return dict(
         profile=PROFILE,
+        presentation_style="broadcast-quiz-v2",
         job_id=job,
         source_sha256=snapshot["source_sha256"],
         attribution=snapshot.get("attribution", "TrackID3x3, CC BY 4.0"),
@@ -375,69 +376,161 @@ def draw_frame(
         )
     else:
         view = np.zeros((VIEW_H, WIDTH, 3), dtype=np.uint8)
-        fit = cv2.resize(frame, (WIDTH, round(fh * WIDTH / fw)))
-        y = (VIEW_H - fit.shape[0]) // 2
-        view[y : y + fit.shape[0]] = fit
+        scale = min(WIDTH / fw, VIEW_H / fh)
+        fit = cv2.resize(frame, (max(1, round(fw * scale)), max(1, round(fh * scale))))
+        y, x = (VIEW_H - fit.shape[0]) // 2, (WIDTH - fit.shape[1]) // 2
+        view[y : y + fit.shape[0], x : x + fit.shape[1]] = fit
     canvas = np.full((HEIGHT, WIDTH, 3), (24, 18, 12), dtype=np.uint8)
     canvas[VIEW_Y : VIEW_Y + VIEW_H] = view
     # Always preserve a full-court inset so a zoom does not erase tactical context.
-    inset = cv2.resize(frame, (228, round(fh * 228 / fw)))
+    inset_scale = min(224 / fw, 150 / fh)
+    iw, ih = max(1, round(fw * inset_scale)), max(1, round(fh * inset_scale))
+    inset = cv2.resize(frame, (iw, ih))
     if sample:
         x, y, w, h = sample["bbox"]
         cv2.rectangle(
             inset,
-            (int(x * 228), int(y * inset.shape[0])),
-            (int((x + w) * 228), int((y + h) * inset.shape[0])),
+            (int(x * iw), int(y * ih)),
+            (int((x + w) * iw), int((y + h) * ih)),
             (75, 230, 190),
             2,
         )
-    canvas[VIEW_Y + 14 : VIEW_Y + 14 + inset.shape[0], WIDTH - 242 : WIDTH - 14] = inset
+    ix, iy = WIDTH - iw - 24, VIEW_Y + 20
+    canvas[iy : iy + ih, ix : ix + iw] = inset
     image = Image.fromarray(cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB))
     d = ImageDraw.Draw(image)
-    text(d, (24, 14), "PLAYLATTICE", 32, bold=True)
-    text(
-        d,
-        (24, 61),
-        f"{segment.get('display_label', segment['label'])}  |  Replay {replay_number}/{replay_count}  |  Source {timestamp / 1000:.1f}s",
-        22,
-        width=70,
+    # Broadcast-style hierarchy: brand, player, film, then one clear insight.
+    d.rectangle((0, 0, WIDTH, 125), fill="#0b111a")
+    d.rounded_rectangle((30, 17, 78, 54), radius=9, fill="#ff7834")
+    d.text((39, 24), "PL", font=font(22, True), fill="#18110b")
+    text(d, (91, 20), "PLAYLATTICE", 24, bold=True)
+    d.text((480, 26), "READ THE GAME", font=font(14, True), fill="#899bb2")
+    label = segment.get("display_label", segment["label"])
+    d.rounded_rectangle((30, 69, 205, 105), radius=8, fill="#192737", outline="#344457")
+    d.text((43, 75), label, font=font(22, True), fill="white")
+    d.text(
+        (228, 78),
+        f"REPLAY {replay_number:02}/{replay_count:02}",
+        font=font(17, True),
+        fill="#9eafc2",
     )
-    y = VIEW_Y + VIEW_H + 18
+    d.text((480, 78), f"SOURCE {timestamp / 1000:.1f}s", font=font(17), fill="#9eafc2")
+    span = max(1, segment["source_end_ms"] - segment["source_start_ms"])
+    progress = min(1, max(0, (timestamp - segment["source_start_ms"]) / span))
+    d.rectangle((30, 116, 640, 119), fill="#263548")
+    d.rectangle((30, 116, 30 + round(610 * progress), 119), fill="#ff883f")
+    d.rectangle((0, VIEW_Y, WIDTH - 1, VIEW_Y + VIEW_H), outline="#34465a", width=2)
+    d.rectangle((ix - 2, iy - 2, ix + iw + 1, iy + ih + 1), outline="#d4e1ed", width=2)
+    d.rectangle((ix, iy, ix + min(iw, 126), iy + 19), fill="#0b111a")
+    d.text((ix + 7, iy + 3), "COURT VIEW", font=font(12, True), fill="#dce7ee")
+    panel_y = VIEW_Y + VIEW_H + 20
+    d.rounded_rectangle(
+        (16, panel_y, 660, 1212), radius=20, fill="#101b29", outline="#293c52", width=2
+    )
     if quiz and freeze:
-        y = text(d, (24, y), "WHAT HAPPENS NEXT?", 25, color="#b8f56b", bold=True)
-        y = text(
-            d, (24, y + 3), quiz["question"].replace("track", "player"), 24, width=52
+        text(d, (34, 792), "WHAT HAPPENS NEXT?", 29, color="#ff9758", bold=True)
+        short_question = (
+            "Which Way Will This Player Shift?"
+            if "which way" in quiz["question"].lower()
+            else quiz["question"].replace("track", "player")
         )
-        if countdown is not None:
-            text(
-                d,
-                (WIDTH - 86, VIEW_Y + VIEW_H + 18),
-                str(countdown),
-                28,
-                color="#b8f56b",
-                bold=True,
+        text(d, (34, 839), short_question, 30, width=33, bold=True)
+        text(
+            d,
+            (34, 917),
+            "Screen direction in the court view",
+            18,
+            color="#9fb3c9",
+            width=55,
+        )
+        for index, option in enumerate(quiz["options"]):
+            top = 953 + index * 66
+            d.rounded_rectangle(
+                (32, top, 640, top + 56),
+                radius=12,
+                fill="#1b2c40",
+                outline="#425875",
+                width=2,
             )
-        for option in quiz["options"]:
-            y = text(d, (30, y + 1), option["id"] + ". " + option["text"], 23, width=55)
+            d.rounded_rectangle((43, top + 9, 82, top + 47), radius=8, fill="#ff8845")
+            d.text((55, top + 14), option["id"], font=font(24, True), fill="#15100b")
+            text(d, (99, top + 13), option["text"], 25, bold=True, width=45)
+        remaining = max(
+            0,
+            min(
+                QUIZ_HOLD_SECONDS,
+                countdown if countdown is not None else QUIZ_HOLD_SECONDS,
+            ),
+        )
+        d.ellipse((582, 788, 638, 844), fill="#1b2c40", outline="#435875", width=3)
+        d.arc(
+            (582, 788, 638, 844),
+            -90,
+            -90 + 360 * remaining / QUIZ_HOLD_SECONDS,
+            fill="#ff9758",
+            width=5,
+        )
+        d.text(
+            (610, 815), str(remaining), font=font(29, True), fill="white", anchor="mm"
+        )
+        for tick in range(QUIZ_HOLD_SECONDS):
+            left = 34 + tick * 121
+            d.rounded_rectangle(
+                (left, 1164, left + 109, 1170),
+                radius=3,
+                fill="#ff9758" if tick < remaining else "#2b3c51",
+            )
+        text(
+            d,
+            (34, 1181),
+            "PICK A, B OR C BEFORE PLAY RESUMES",
+            15,
+            color="#b6c6d8",
+            width=65,
+        )
     elif quiz and timestamp >= quiz["reveal_ms"]:
         answer = next(
             o["text"] for o in quiz["options"] if o["id"] == quiz["correct_option_id"]
         )
-        y = text(
-            d, (24, y), "ANSWER: " + answer, 27, color="#b8f56b", bold=True, width=42
+        text(d, (34, 799), "THE NEXT MOVE", 22, color="#a4e984", bold=True)
+        text(
+            d, (34, 849), "ANSWER: " + answer, 34, color="#d9ffc4", bold=True, width=31
         )
-        text(d, (24, y + 5), quiz["explanation"], 23, width=53)
+        y = text(d, (34, 950), quiz["explanation"], 26, width=40)
+        d.rounded_rectangle(
+            (32, 1094, 640, 1170), radius=13, fill="#1e392c", outline="#6fb080", width=2
+        )
+        d.line((50, 1132, 62, 1144, 84, 1119), fill="#bdff9e", width=5)
+        text(
+            d,
+            (103, 1117),
+            "Evidence, Then The Reveal",
+            26,
+            color="#d9ffc4",
+            bold=True,
+            width=38,
+        )
     else:
         headline, detail = observation(segment["samples"], timestamp)
-        y = text(d, (24, y), headline, 34, bold=True, width=36)
-        text(d, (24, y + 6), detail, 26, color="#c6d0df", width=48)
+        text(d, (34, 800), "PLAYER SPOTLIGHT", 22, color="#ff9758", bold=True)
+        text(d, (34, 853), headline, 40, bold=True, width=27)
+        text(d, (34, 975), detail, 27, color="#bfd0e1", width=40)
+        d.rectangle((34, 1092, 38, 1161), fill="#ff8845")
+        text(
+            d,
+            (55, 1095),
+            "Tracked movement. Watch the next decision.",
+            22,
+            color="#9fb3c9",
+            width=43,
+        )
     text(
         d,
-        (24, HEIGHT - 44),
-        "Player labels provisional  |  " + attribution,
-        17,
-        color="#adb8c8",
-        width=80,
+        (30, 1231),
+        "Provisional player labels  |  " + attribution,
+        14,
+        color="#94a7bb",
+        width=90,
     )
     return cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR), previous
 
@@ -599,6 +692,7 @@ def render_portrait(
     audio_receipt = add_audio(source, output, audio_parts, music, music_cues)
     result = dict(
         profile=PROFILE,
+        presentation_style="broadcast-quiz-v2",
         width=WIDTH,
         height=HEIGHT,
         fps=FPS,

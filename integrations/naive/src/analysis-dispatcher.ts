@@ -6,6 +6,7 @@ import { naiveClient, safeError } from './client.js';
 import { buildEvidence, snapshotId } from './analysis-contract.js';
 import { WorkflowStore } from './analysis-store.js';
 import { createAnalysisEngine } from './analysis-engine.js';
+import {discoveryRequest} from './discovery-http.js';
 import {pipelineRequest} from './pipeline-http.js';
 import {previewRequest} from './preview-http.js';
 const folder=fileURLToPath(new URL('../../../data/naive/',import.meta.url));
@@ -49,6 +50,7 @@ async function tick(explicitGame?:string) {
 const server=createServer(async(req,res)=>{
  res.setHeader('Content-Type','application/json');res.setHeader('Cache-Control','no-store');
  try {
+  if(await discoveryRequest(req,res,folder))return;
   if(await pipelineRequest(req,res,store,folder))return;
   if(await previewRequest(req,res,store,folder+'portrait-exports'))return;
   const url=new URL(req.url||'/','http://127.0.0.1');

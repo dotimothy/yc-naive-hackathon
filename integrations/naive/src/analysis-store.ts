@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import {taskBudgetTotal} from './task-budget.js';
 export class WorkflowStore {
  readonly db: DatabaseSync;
  constructor(path: string) {
@@ -16,7 +17,7 @@ export class WorkflowStore {
   this.db.exec('BEGIN IMMEDIATE');
   try {
    if(this.get(r.job_id)) {this.db.exec('COMMIT');return false;}
-   const used=Number(this.db.prepare('SELECT COALESCE(SUM(reserved),0) AS used FROM workflows WHERE month=?').get(r.month)!.used);
+   const used=Number(this.db.prepare('SELECT COALESCE(SUM(reserved),0) AS used FROM workflows WHERE month=?').get(r.month)!.used)+taskBudgetTotal(this.db,r.month);
    // $9 leaves $1 of the approved $10 allocation for onboarding and diagnostics.
    if(used+1_000_000>9_000_000) throw new Error('Integration monthly allocation exhausted');
    this.save({...r,reserved:1_000_000});this.db.exec('COMMIT');return true;
@@ -30,7 +31,7 @@ export class WorkflowStore {
    r.publication_reservations ||= {};
    if(Object.hasOwn(r.publication_reservations,profile)){this.db.exec('COMMIT');return;}
    if(r.reserved+fee>1_000_000)throw new Error('Publishing exceeds the approved per-video cap');
-   const used=Number(this.db.prepare('SELECT COALESCE(SUM(reserved),0) AS used FROM workflows WHERE month=?').get(r.month)!.used);
+   const used=Number(this.db.prepare('SELECT COALESCE(SUM(reserved),0) AS used FROM workflows WHERE month=?').get(r.month)!.used)+taskBudgetTotal(this.db,r.month);
    if(used+fee>9_000_000)throw new Error('Publishing exceeds the integration monthly allocation');
    r.reserved+=fee;r.publication_reservations[profile]=fee;this.save(r);this.db.exec('COMMIT');
   }catch(e){this.db.exec('ROLLBACK');throw e;}

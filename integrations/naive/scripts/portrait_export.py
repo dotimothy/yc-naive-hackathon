@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 from workers.render.portrait import build_plan, render_portrait  # noqa: E402
+from workers.render.cover import render_cover  # noqa: E402
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--snapshot", required=True)
@@ -90,7 +91,10 @@ subprocess.run(
     timeout=120,
     check=True,
 )
+cover = render_cover(source, plan, quizzes, folder / "cover.jpg")
 receipt.update(
+    cover=cover,
+    presentation_style="broadcast-quiz-v2",
     job_id=snapshot["job_id"],
     source_sha256=snapshot["source_sha256"],
     sha256=hashlib.sha256(output.read_bytes()).hexdigest(),

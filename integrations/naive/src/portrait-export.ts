@@ -41,15 +41,15 @@ export async function portraitExport(jobId:string,gameId:string,selected:any,bas
   await promisify(execFile)(python,[join(root,'integrations/naive/scripts/quiz_music.py'),'--music-id',chosen.id,'--output',generated],{cwd:root,timeout:15000,maxBuffer:1024*1024});
   musicPath=generated;musicHash=digest(await readFile(generated));musicTitle=chosen.title;musicOrigin='original_procedural_composition';
  }
- const identity=digest(JSON.stringify({snapshot:hash,quiz_ids:quizReceipt.selected_candidate_ids,music:musicHash||null,profile:PORTRAIT_PROFILE,renderer:digest(await readFile(join(root,'workers/render/portrait.py')))}));
+ const identity=digest(JSON.stringify({snapshot:hash,quiz_ids:quizReceipt.selected_candidate_ids,music:musicHash||null,profile:PORTRAIT_PROFILE,renderer:digest(await readFile(join(root,'workers/render/portrait.py'))),cover_renderer:digest(await readFile(join(root,'workers/render/cover.py')))}));
  const renderFolder=join(folder,'render-'+identity.slice(0,16));await mkdir(renderFolder,{recursive:true});
  let receipt:any;
- try{const cached=JSON.parse(await readFile(join(renderFolder,'receipt.json'),'utf8'));if(cached.render_identity===identity&&digest(await readFile(cached.output_path))===cached.sha256)receipt=cached;}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;}
+ try{const cached=JSON.parse(await readFile(join(renderFolder,'receipt.json'),'utf8'));if(cached.render_identity===identity&&digest(await readFile(cached.output_path))===cached.sha256&&cached.cover?.path&&digest(await readFile(cached.cover.path))===cached.cover.sha256)receipt=cached;}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;}
  if(!receipt){await run(['--quizzes',quizPath,...(musicPath?['--quiz-music',musicPath]:[])],renderFolder);receipt=JSON.parse(await readFile(join(renderFolder,'receipt.json'),'utf8'));receipt.render_identity=identity;receipt.clipper_quiz_agent=quizReceipt;receipt.quiz_music_title=musicTitle;receipt.music_origin=musicOrigin;await writeFile(join(renderFolder,'receipt.json'),JSON.stringify(receipt,null,2),{mode:0o600});}
  const metadata=await probeMedia(receipt.output_path);const checked=validateTikTokMedia(metadata);
  const bytes=await readFile(receipt.output_path);
  if(checked.width*16!==checked.height*9||checked.fps!==30||!receipt.captions_burned_in||!receipt.decoded||digest(bytes)!==receipt.sha256)throw new Error('Portrait presentation failed technical QA');
  const store=new WorkflowStore(join(data,'analysis-workflows.sqlite3'));
- try{const r=store.get(jobId);if(!r||r.state!=='succeeded')throw new Error('Parent workflow no longer succeeded');r.presentation={profile:PORTRAIT_PROFILE,path:receipt.output_path,receipt_path:join(renderFolder,'receipt.json'),music_path:musicPath||null,preview_uri:`http://127.0.0.1:8011/previews/${encodeURIComponent(jobId)}`,track_count:receipt.track_count,quiz_count:receipt.quiz_count,quiz_music_missing:receipt.quiz_music_missing};store.save(r);}finally{store.close();}
+ try{const r=store.get(jobId);if(!r||r.state!=='succeeded')throw new Error('Parent workflow no longer succeeded');r.presentation={profile:PORTRAIT_PROFILE,path:receipt.output_path,receipt_path:join(renderFolder,'receipt.json'),music_path:musicPath||null,cover_path:receipt.cover?.path||null,preview_uri:`http://127.0.0.1:8011/previews/${encodeURIComponent(jobId)}`,track_count:receipt.track_count,quiz_count:receipt.quiz_count,quiz_music_missing:receipt.quiz_music_missing};store.save(r);}finally{store.close();}
  return {path:receipt.output_path,bytes,sha256:receipt.sha256,metadata,recipe:receipt};
 }
