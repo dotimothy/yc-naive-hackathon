@@ -8,6 +8,8 @@ import { EVENT_TYPE_LABEL, HighlightsPanel } from './HighlightsPanel';
 import { BasketballPanel, type BallObject } from './BasketballPanel';
 import { LiveBoard } from './LiveBoard';
 import { NaiveDashboard } from './NaiveDashboard';
+import { SplashGate } from './SplashScreen';
+import { VideoThumbnail } from './VideoThumbnail';
 import type { CameraShot, Clip, Game, GameEvent, Job } from './types';
 import { isTerminal, useGameRoom, type DelayStats } from './useGameRoom';
 import './styles.css';
@@ -150,6 +152,7 @@ function App() {
                 {[...games].reverse().map((g) => (
                   <li key={g.game_id}>
                     <button className={g.game_id === selectedId ? 'game active' : 'game'} onClick={() => setSelectedId(g.game_id)}>
+                      <VideoThumbnail gameId={g.game_id} title={g.title} />
                       <div className="game-title">
                         <strong>{g.title}</strong>
                         {(() => {
@@ -697,6 +700,6 @@ function CourtArt() {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <SplashGate><App /></SplashGate>
   </StrictMode>,
 );

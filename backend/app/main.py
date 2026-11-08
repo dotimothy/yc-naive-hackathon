@@ -26,6 +26,7 @@ from workers.video.runtime import available_devices, select_device, POSE_MODEL
 from backend.app.highlight_routes import router as highlight_router, public_highlights
 from backend.app.basketball_routes import router as basketball_router
 from backend.app.shot_routes import router as shot_router
+from backend.app.thumbnail_routes import router as thumbnail_router
 from workers.video.sports.basketball import OUTDOOR_SAMPLE_COURT
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -393,6 +394,7 @@ async def lifespan(app):
 
 
 app = FastAPI(title="PlayLattice local", lifespan=lifespan)
+app.include_router(thumbnail_router)
 
 
 @app.get("/api/health")
