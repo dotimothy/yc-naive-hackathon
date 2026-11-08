@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import './NaiveDashboard.css';
 import { VideoThumbnail } from './VideoThumbnail';
+import { normalizeActivity, TeamActivityPanel, type TeamActivity } from './NaiveTeamActivity';
 
-/* Read-only view of the Naive crew pipeline served by the local integration on 127.0.0.1:8011
-   (proxied as /naive-api). It never posts, starts or cancels anything; it only renders what the
-   endpoint reports. Missing fields are shown as "–", never filled in. */
-
+/* Live pipeline dashboard with explicit controls. */
 const ENDPOINT = '/naive-api/pipeline';
 const PAGE_SIZE = 15;
 const POLL_MS = 4000;
@@ -20,7 +18,7 @@ type BatchItem = {
 };
 type Batch = {
   id?: string; status?: string; stop_at?: string | number; updated_at?: string | number;
-  total?: number; counts?: Record<string, number>; items: BatchItem[];
+  total?: number; counts?: Record<string, number>; items: BatchItem[]; deleted_count?: number;
 };
 type Presentation = { preview_uri?: string; track_count?: number; quiz_count?: number; quiz_music_missing?: boolean | number };
 type Publication = { status?: string; url?: string; post_id?: string; error?: string; requested_visibility?: string; profile?: string };
@@ -36,6 +34,7 @@ type Policy = { enabled?: boolean; platform?: string; visibility?: string; stop_
 type Pipeline = {
   updated_at?: string | number; batch: Batch | null; workflows: Workflow[]; budget: Budget | null;
   services: Record<string, string>; crew: CrewMember[]; policy: Policy | null;
+  team_activity: TeamActivity | null;
 };
 
 const obj = (v: unknown): Record<string, unknown> | null => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null);
@@ -59,6 +58,7 @@ function normalize(raw: unknown): Pipeline | null {
     services,
     crew: arr<CrewMember>(r.crew, () => true),
     policy: (obj(r.policy) as Policy | null) ?? null,
+    team_activity: normalizeActivity(r.team_activity),
   };
 }
 
@@ -241,6 +241,7 @@ function postingState(p: Pipeline, now: number) {
   const policyEnded = pol?.stop_at !== undefined && (toMs(pol.stop_at) ?? Infinity) <= now;
   const notes: string[] = [];
   if (pol?.enabled === false) notes.push(policyEnded ? `Auto-publish is off: the authorized posting window ended ${clock(toMs(pol.stop_at))}.` : 'Auto-publish policy is turned off, so nothing new is sent to TikTok.');
+  if (b?.status === 'cancelled') return {tone:'idle' as Tone,pill:'Cancelled',headline:'Batch cancelled',body:'Queued work stopped. Completed results and existing posts are preserved.',notes};
   if (b?.status === 'provider_blocked') {
     return { tone: 'bad' as Tone, pill: 'Blocked', headline: 'Posting is blocked by the social provider',
       body: 'The batch reports “provider blocked”: the Naive social provider is not accepting posts, so no new TikTok posts are going out.', notes };
@@ -309,7 +310,7 @@ function TableToolbar({ id, c, placeholder, statusLabel = 'Status', stageLabel =
           </select>
         </label>
       )}
-      {c.active && <button type="button" className="ghost small" onClick={c.reset}>Clear filters</button>}
+      {c.active && <button type="button" className="ghost small" onClick={c.reset}>Clear Filters</button>}
     </div>
   );
 }
@@ -341,6 +342,45 @@ const NO_FOCUS: Focus = { stage: null, bucket: null };
 export function NaiveDashboard({ active }: { active: boolean }) {
   const { data, lastOk, error, failures, conn, now, polling, snapshotAt } = usePipeline(active);
   const [focus, setFocus] = useState<Focus>(NO_FOCUS);
+  const [dismissed, setDismissed] = useState(() => {try{return localStorage.getItem('playlattice-dismissed-warnings') ?? '';}catch{return '';}});
+  const [controlBusy, setControlBusy] = useState(false);
+  const [controlMessage, setControlMessage] = useState<string | null>(null);
+  const warningKey = JSON.stringify([error, data?.batch?.id, data?.batch?.status, data?.policy?.enabled, data?.batch?.items.filter(i => i.error).map(i => [i.id,i.error]), data?.workflows.filter(w => w.publication?.error).map(w => [w.job_id,w.publication?.error])]);
+  const warningsDismissed = dismissed === warningKey;
+  const clearWarnings = () => {setDismissed(warningKey);try{localStorage.setItem('playlattice-dismissed-warnings',warningKey);}catch{}};
+  const cancelBatch = async () => {
+    if (!data?.batch?.id || !window.confirm('Cancel this batch? Queued work will stop and active work will receive cancellation requests. Completed results and existing posts will be kept.')) return;
+    setControlBusy(true);setControlMessage(null);
+    try {
+      const response = await fetch(`${ENDPOINT}/cancel?batch_id=${encodeURIComponent(data.batch.id)}`, {method:'POST',headers:{'X-PlayLattice-Control':'1'}});
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? 'Could not cancel batch');
+      setControlMessage(result.analysis_cancel_errors?.length ? 'Batch cancelled. Some active analyses could not be stopped; review their job status.' : 'Batch cancelled. Completed results and existing posts were kept.');
+    } catch(e) {setControlMessage(e instanceof Error ? e.message : 'Could not cancel batch');}
+    finally {setControlBusy(false);}
+  };
+  const [deletedIds, setDeletedIds] = useState<Set<string>>(() => new Set());
+  const [deleteBusy, setDeleteBusy] = useState<string | null>(null);
+  const deleteEntry = async (item: BatchItem | 'all') => {
+    const cancelledRows = data?.batch?.items.filter((i) => i.status === 'cancelled' && !deletedIds.has(i.id)) ?? [];
+    const label = item === 'all' ? `all ${cancelledRows.length} cancelled video entries` : `the entry for “${item.name || item.id}”`;
+    if (!data?.batch?.id || !window.confirm(`Delete ${label} from this list? Only cancelled videos can be deleted. Source videos, analyses and any results are kept.`)) return;
+    const key = item === 'all' ? 'all' : item.id;
+    setDeleteBusy(key); setControlMessage(null);
+    try {
+      const target = item === 'all' ? 'all_cancelled=1' : `item_id=${encodeURIComponent(item.id)}`;
+      const response = await fetch(`${ENDPOINT}/items/delete?batch_id=${encodeURIComponent(data.batch.id)}&${target}`, { method: 'POST', headers: { 'X-PlayLattice-Control': '1' } });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error ?? `Could not delete entry (HTTP ${response.status})`);
+      const ids: string[] = Array.isArray(result.deleted) ? result.deleted : [key];
+      setDeletedIds((prev) => { const next = new Set(prev); for (const id of ids) next.add(id); return next; });
+      setControlMessage(item === 'all' ? `Deleted ${ids.length} cancelled video entr${ids.length === 1 ? 'y' : 'ies'}.` : `Deleted the entry for ${item.name || item.id}.`);
+    } catch (e) { setControlMessage(e instanceof Error ? e.message : 'Could not delete entry'); }
+    finally { setDeleteBusy(null); }
+  };
+  // Hide just-deleted rows until the next snapshot confirms the deletion.
+  const batchView = useMemo(() => data?.batch && deletedIds.size ? { ...data.batch, items: data.batch.items.filter((i) => !deletedIds.has(i.id)) } : data?.batch ?? null, [data?.batch, deletedIds]);
+  const videoName = (jobId: string) => data?.batch?.items.find((i) => i.job_id === jobId)?.name ?? null;
   const posting = data ? postingState(data, now) : null;
   const postingBlocked = data?.batch?.status === 'provider_blocked' || data?.policy?.enabled === false;
 
@@ -350,7 +390,7 @@ export function NaiveDashboard({ active }: { active: boolean }) {
         <div className="panel-head">
           <div>
             <h2>Naive Crew Pipeline</h2>
-            <p className="muted small">How each authorized clip becomes a TikTok portrait quiz, and where the batch is stuck. Read-only — every number comes from the local Naive integration.</p>
+            <p className="muted small">How each authorized clip becomes a TikTok portrait quiz, and where the batch is stuck. Manage the batch and review results from the local Naive integration.</p>
           </div>
           <div className="naive-pills">
             <div className="naive-pill" role="status" aria-live="polite" title="Whether this dashboard is receiving snapshots. It does not mean the workflow is healthy.">
@@ -366,12 +406,19 @@ export function NaiveDashboard({ active }: { active: boolean }) {
             )}
           </div>
         </div>
+        <div className="naive-controls">
+          <button className="secondary small" onClick={clearWarnings} disabled={warningsDismissed}>Clear Warnings</button>
+          {warningsDismissed && <button className="ghost small" onClick={() => {setDismissed('');try{localStorage.removeItem('playlattice-dismissed-warnings');}catch{}}}>Show Warnings</button>}
+          <button className="ghost small danger" disabled={controlBusy || !data?.batch?.id || data.batch.status === 'cancelled' || !!controlMessage?.startsWith('Batch cancelled')} onClick={() => void cancelBatch()}>{controlBusy ? 'Cancelling…' : data?.batch?.status === 'cancelled' ? 'Batch Cancelled' : 'Cancel Batch'}</button>
+          <span className="muted small">Clearing warnings hides current banners on this browser. Error history stays available below.</span>
+        </div>
+        {controlMessage && <p role="status">{controlMessage}</p>}
         <p className="naive-feednote small muted">
           Snapshot {ago(snapshotAt, now)} · last successful poll {ago(lastOk, now)}
           {data?.batch?.updated_at !== undefined && <> · queue last wrote its state {ago(toMs(data.batch.updated_at), now)}</>}
           . “Live” only means the feed is connected.
         </p>
-        {error && (
+        {error && !warningsDismissed && (
           <div className={data ? 'alert warn' : 'alert error'}>
             {data
               ? `Pipeline endpoint unreachable (${error}; ${failures} failed poll${failures === 1 ? '' : 's'}). Showing the last snapshot from ${ago(lastOk, now)} — it may be out of date.`
@@ -384,13 +431,14 @@ export function NaiveDashboard({ active }: { active: boolean }) {
         <section className="panel"><p className="muted small">{conn === 'connecting' ? 'Waiting for the first pipeline snapshot…' : 'No pipeline data received yet. Nothing is shown until the endpoint reports it.'}</p></section>
       ) : (
         <div className={conn === 'live' ? 'naive-body' : 'naive-body dim'}>
-          <StatusBanner data={data} posting={posting} focus={focus} setFocus={setFocus} stale={conn !== 'live'} />
+          {!warningsDismissed && <StatusBanner data={data} posting={posting} focus={focus} setFocus={setFocus} stale={conn !== 'live'} />}
           <Flow data={data} focus={focus} setFocus={setFocus} blocked={postingBlocked} />
           <div className="naive-grid">
             <NowPanel data={data} blocked={postingBlocked} />
             <PostsPanel data={data} now={now} />
           </div>
-          <BatchTable batch={data.batch} focus={focus} setFocus={setFocus} />
+          <TeamActivityPanel activity={data.team_activity} videoName={videoName} now={now} feedLive={conn === 'live'} />
+          <BatchTable batch={batchView} focus={focus} setFocus={setFocus} onDelete={deleteEntry} deleting={deleteBusy} />
           <div className="naive-grid secondary">
             <CrewRoles crew={data.crew} workflows={data.workflows} />
             <BudgetPanel budget={data.budget} workflows={data.workflows} />
@@ -482,7 +530,7 @@ function Flow({ data, focus, setFocus, blocked }: { data: Pipeline; focus: Focus
           <h3 id="naive-flow-h">How a video moves through the crew</h3>
           <p className="muted small">Numbers are this batch’s videos at the step they were last reported at. Click a step to list its videos.</p>
         </div>
-        {focus.stage !== null && <button type="button" className="ghost small" onClick={() => setFocus({ ...focus, stage: null })}>Show all steps</button>}
+        {focus.stage !== null && <button type="button" className="ghost small" onClick={() => setFocus({ ...focus, stage: null })}>Show All Steps</button>}
       </div>
       <div className="naive-key small" aria-hidden="true">
         <span><i className="tag local">Local</i> PlayLattice code on this machine</span>
@@ -615,24 +663,28 @@ function PostsPanel({ data, now }: { data: Pipeline; now: number }) {
 }
 
 const EMPTY_ITEMS: BatchItem[] = [];
-function BatchTable({ batch, focus, setFocus }: { batch: Batch | null; focus: Focus; setFocus: (f: Focus) => void }) {
+function BatchTable({ batch, focus, setFocus, onDelete, deleting }: { batch: Batch | null; focus: Focus; setFocus: (f: Focus) => void; onDelete: (item: BatchItem | 'all') => void; deleting: string | null }) {
   const all = batch?.items ?? EMPTY_ITEMS;
   const items = useMemo(() => all.filter((i) =>
     (focus.stage === null || stageIndex(i.stage) === focus.stage) && (focus.bucket === null || inBucket(i.status, focus.bucket))), [all, focus]);
   const c = useTableControls(items, (i) => [i.id, i.name, i.stage, i.status, i.game_id, i.job_id, i.error].join(' '),
     { status: (i) => i.status, stage: (i) => i.stage }, `${focus.stage}-${focus.bucket}`);
+  const cancelledCount = all.filter((i) => i.status === 'cancelled').length;
   const focused = focus.stage !== null || focus.bucket !== null;
   const focusText = [focus.stage !== null && `Step ${focus.stage + 1} · ${FLOW[focus.stage].label}`, focus.bucket && BUCKETS.find((b) => b.key === focus.bucket)?.label].filter(Boolean).join(' + ');
   return (
     <section className="panel" id="naive-batch-list" aria-labelledby="naive-batch-h">
       <div className="panel-head">
         <h3 id="naive-batch-h">Batch Videos</h3>
-        <span className="muted small">{batch ? plural(all.length, 'item') : 'no active batch'}</span>
+        <span className="naive-batch-actions">
+          <span className="muted small">{batch ? plural(all.length, 'item') : 'no active batch'}{batch?.deleted_count ? ` · ${batch.deleted_count} cancelled deleted` : ''}</span>
+          {cancelledCount > 0 && <button type="button" className="ghost small danger" disabled={deleting !== null} onClick={() => onDelete('all')}>{deleting === 'all' ? 'Deleting…' : `Delete All Cancelled (${cancelledCount})`}</button>}
+        </span>
       </div>
       {focused && (
         <div className="naive-focusbar" role="status">
           <span>Showing <b>{focusText}</b> — {items.length} of {all.length} videos</span>
-          <button type="button" className="secondary small" onClick={() => setFocus(NO_FOCUS)}>Show all videos</button>
+          <button type="button" className="secondary small" onClick={() => setFocus(NO_FOCUS)}>Show All Videos</button>
         </div>
       )}
       {!batch || all.length === 0 ? <p className="muted small">{batch ? 'The batch has no items yet.' : 'No discovery batch is running.'}</p> : (<>
@@ -671,7 +723,14 @@ function BatchTable({ batch, focus, setFocus }: { batch: Batch | null; focus: Fo
                         <span className="table-note">{words(it.stage)}</span>
                       </span>
                     </td>
-                    <td><Status value={it.status} /></td>
+                    <td>
+                      <Status value={it.status} />
+                      {it.status === 'cancelled' && (
+                        <button type="button" className="ghost small naive-delete" disabled={deleting !== null} aria-label={`Delete entry for ${it.name || it.id}`} onClick={() => onDelete(it)}>
+                          {deleting === it.id ? 'Deleting…' : 'Delete Entry'}
+                        </button>
+                      )}
+                    </td>
                     <td><SafeLink href={it.preview_url}>Preview ↗</SafeLink></td>
                     <td><SafeLink href={it.post_url}>Post ↗</SafeLink></td>
                   </tr>
