@@ -78,6 +78,20 @@ Tabs remain mounted so review drafts and the source playhead survive navigation.
 | Frontend | `frontend/src/main.tsx`, `SectionTabs.tsx`, `FilmPlayer.tsx`, `HighlightsPanel.tsx`, `PlayerHighlightsTable.tsx`, `PlayerStatsCard.tsx` | Film-room tabs, synchronized replay, tables, candidate review and evidence |
 | Other panels | `LiveBoard.tsx`, `ShotSegmentsPanel.tsx`, `BasketballPanel.tsx`, `useGameRoom.ts` in `frontend/src/` | Summary, shot review, object evidence and live job state |
 
+The company roster has two execution paths:
+
+```mermaid
+flowchart LR
+    CEO[CEO / Coordinator] --> Video[Scout · Clipper · Caption Editor · Analyst · Channel Manager]
+    CEO -. team member .-> Outreach[Outreach]
+    Inbox[AgentMail inbound email] --> Outreach
+    Outreach --> Decision[Catalog recommendation / clarification / clip request]
+    Decision --> Mailroom[Local validation + source render + media QA]
+    Mailroom --> Reply[AgentMail reply + expiring preview]
+```
+
+The AgentMail worker invokes Outreach directly for inbound conversations. CEO roster membership does not mean every email runs through the video-analysis team.
+
 The inbound email branch uses AgentMail → a durable local intake ledger → Naive’s `outreach` specialist → deterministic mailroom validation → source clipping and media QA → an expiring preview link and AgentMail reply. Outreach is a CEO team member, separate from the five video-analysis specialists. Its structured output selects catalog IDs and source times; local code owns source access, rendering, recipient selection, and delivery. AgentMail credentials stay in the local worker. See `integrations/agentmail/README.md` for activation and `docs/html/architecture.html` for the system map. Email does not change the social publishing policy.
 
 Daily discovery runs independently with a five-video daily target and alternates quiz and captioned storytelling exports; see `docs/DAILY_AUTONOMOUS_VIDEO.md`. Root setup and startup commands are `./setup.sh` and `./run.sh`.
