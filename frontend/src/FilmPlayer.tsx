@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import type { BallObject } from './BasketballPanel';
 import type { CameraShot, Clip, Game, Keypoint, TrackSample } from './types';
 
@@ -182,9 +182,71 @@ type PlayerProps = {
   selectedTrack: string | null;
 };
 
+type WebkitDocument = Document & { webkitFullscreenElement?: Element | null; webkitExitFullscreen?: () => Promise<void> | void };
+type WebkitElement = HTMLElement & { webkitRequestFullscreen?: () => Promise<void> | void };
+type WebkitVideo = HTMLVideoElement & { webkitExitFullscreen?: () => void; webkitDisplayingFullscreen?: boolean };
+
+const fullscreenElement = () => document.fullscreenElement ?? (document as WebkitDocument).webkitFullscreenElement ?? null;
+
+function enterFullscreen(el: HTMLElement) {
+  const req = el.requestFullscreen?.bind(el) ?? (el as WebkitElement).webkitRequestFullscreen?.bind(el);
+  return Promise.resolve(req?.()).catch(() => undefined);
+}
+
+function exitFullscreen() {
+  const d = document as WebkitDocument;
+  const exit = document.exitFullscreen?.bind(document) ?? d.webkitExitFullscreen?.bind(d);
+  return Promise.resolve(exit?.()).catch(() => undefined);
+}
+
+/**
+ * Fullscreen the stage (video + annotation layer) rather than the bare <video>,
+ * whose native fullscreen would hide the overlay. If the browser's own video
+ * fullscreen is triggered anyway (Firefox button, double-click, Safari), swap it
+ * for the stage.
+ */
+function useStageFullscreen(shellRef: RefObject<HTMLDivElement | null>, videoRef: RefObject<HTMLVideoElement | null>) {
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  useEffect(() => {
+    const shell = shellRef.current;
+    const video = videoRef.current as WebkitVideo | null;
+    if (!shell || !video) return;
+    const onChange = () => {
+      const el = fullscreenElement();
+      if (el === video) {
+        void exitFullscreen().then(() => enterFullscreen(shell));
+        return;
+      }
+      setIsFullscreen(el === shell);
+    };
+    // Safari's native video fullscreen does not go through the Fullscreen API.
+    const onWebkitBegin = () => {
+      video.webkitExitFullscreen?.();
+      void enterFullscreen(shell);
+    };
+    document.addEventListener('fullscreenchange', onChange);
+    document.addEventListener('webkitfullscreenchange', onChange);
+    video.addEventListener('webkitbeginfullscreen', onWebkitBegin);
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange);
+      document.removeEventListener('webkitfullscreenchange', onChange);
+      video.removeEventListener('webkitbeginfullscreen', onWebkitBegin);
+    };
+  }, [shellRef, videoRef]);
+  const toggle = useCallback(() => {
+    const shell = shellRef.current;
+    if (!shell) return;
+    if (fullscreenElement() === shell) void exitFullscreen();
+    else void enterFullscreen(shell);
+  }, [shellRef]);
+  return { isFullscreen, toggle };
+}
+
 export function FilmPlayer({ game, videoRef, playheadMs, index, showBoxes, showPose, showFootDot, interpolate, selectedTrack, objects = [], shots = [] }: PlayerProps) {
   const [videoError, setVideoError] = useState<string | null>(null);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const { isFullscreen, toggle: toggleFullscreen } = useStageFullscreen(shellRef, videoRef);
   const W = game.width || natural?.w || 16;
   const H = game.height || natural?.h || 9;
   const currentShot = shots.find(s => s.start_ms <= playheadMs && playheadMs < s.end_ms);
@@ -203,11 +265,14 @@ export function FilmPlayer({ game, videoRef, playheadMs, index, showBoxes, showP
 
   return (
     <div className="player">
+      <div ref={shellRef} className="stage-shell" style={{ '--stage-ratio': W / H } as CSSProperties}>
       <div className="stage" style={{ aspectRatio: `${W} / ${H}`, width: `min(100%, calc(68vh * ${W / H}))` }}>
         <video
           ref={videoRef}
           src={game.source_uri}
           controls
+          // Hide the native fullscreen button (Chromium); ours keeps the annotations.
+          controlsList="nofullscreen"
           playsInline
           preload="metadata"
           onLoadedMetadata={(e) => {
@@ -275,6 +340,10 @@ export function FilmPlayer({ game, videoRef, playheadMs, index, showBoxes, showP
           </span>
         </div>
         {videoError && <div className="stage-error">{videoError}</div>}
+        <button type="button" className="stage-fullscreen" onClick={toggleFullscreen} aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen with annotations'} title={isFullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen with annotations'}>
+          {isFullscreen ? '✕ Exit fullscreen' : '⛶ Fullscreen'}
+        </button>
+      </div>
       </div>
       {mismatch && (
         <p className="warn small">
