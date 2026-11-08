@@ -55,9 +55,10 @@ body{font-family:var(--body)}
 .company-close h2{font:italic 800 clamp(34px,4vw,52px)/1.05 var(--display)}
 @media(max-width:760px){.company-title{font-size:clamp(58px,15vw,84px)}.company-hero h1{font-size:clamp(36px,10vw,54px)}.company-tagline{font-size:13px;letter-spacing:.17em}.company-description{font-size:16px}.company-loop{font-size:11px}.company-nav nav a{font-size:14px}}
 
-/* Quiet partner strip, paired with the recommendation contact. */
-.sponsor-section { display:grid; grid-template-columns:1fr 1fr; align-items:center; gap:64px; border-top:1px solid var(--line); border-bottom:1px solid var(--line); padding:40px 0; margin-top:16px; }
-.sponsor-eyebrow { display:block; color:var(--muted); font:500 12px var(--body); letter-spacing:.12em; text-transform:uppercase; margin-bottom:20px; }
+/* Compact sponsor acknowledgement. */
+.sponsor-section { display:flex; align-items:center; border-top:1px solid var(--line); border-bottom:1px solid var(--line); padding:28px 0; margin-top:16px; }
+.sponsor-partners { display:flex; align-items:center; gap:30px; }
+.sponsor-eyebrow { display:block; color:var(--muted); font:500 12px var(--body); letter-spacing:.12em; text-transform:uppercase; margin-bottom:0; }
 .sponsor-logos { display:flex; align-items:center; gap:24px; min-height:52px; }
 .sponsor-naive { display:flex; align-items:center; gap:9px; text-decoration:none; color:var(--text); }
 .sponsor-naive > span { font:italic 500 30px Georgia,serif; letter-spacing:-.04em; }
@@ -66,18 +67,11 @@ body{font-family:var(--body)}
 .sponsor-agentmail img { display:block; width:139px; height:26px; }
 .yc-company { color:var(--muted); font:400 11px var(--body); text-decoration:none; padding-left:26px; }
 .yc-company:hover { color:var(--accent-2); }
-.sponsor-email { border-left:1px solid var(--line); padding-left:40px; }
-.sponsor-email .sponsor-eyebrow { margin-bottom:10px; }
-.sponsor-email h2 { font:500 24px/1.25 var(--body); letter-spacing:-.03em; margin:0 0 14px; text-transform:none; }
-.sponsor-contact { display:inline-flex; align-items:center; gap:20px; color:var(--accent-2); text-decoration:none; font:500 14px var(--body); }
-.sponsor-contact:hover { text-decoration:underline; text-underline-offset:5px; }
-.sponsor-address { display:block; font:400 12px var(--body); color:var(--muted); margin-top:7px; }
 .sponsor-section a:focus-visible { outline:2px solid var(--accent); outline-offset:6px; }
-@media(max-width:760px) { .sponsor-section { grid-template-columns:1fr; gap:30px; padding:30px 4px; } .sponsor-email { border-left:0; border-top:1px solid var(--line); padding:24px 0 0; } .sponsor-logos { gap:20px; } }
+@media(max-width:760px) { .sponsor-section { padding:24px 4px; } .sponsor-partners { flex-wrap:wrap; gap:16px 24px; } .sponsor-logos { gap:20px; } }
 
 .company-actions:has(.recommendation-cta) { margin-bottom:14px; }
 .hero-recommendation { margin:0 auto 26px; max-width:540px; color:var(--muted); font:400 14px/1.7 var(--body); }
 .hero-recommendation > a { display:inline-block; color:var(--text); text-underline-offset:4px; margin-top:6px; }
 .recommendation-powered { display:inline-block; color:var(--muted); font-size:11px; margin-left:14px; }
-.company-nav nav .recommendation-nav { color:var(--accent-2); }
 @media(max-width:760px) { .hero-recommendation { font-size:13px; } .recommendation-powered { display:block; margin:4px 0 0; } .company-actions .recommendation-cta { width:100%; max-width:340px; } }
