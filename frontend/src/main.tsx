@@ -9,6 +9,55 @@ import './styles.css';
 
 const errorText = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback);
 
+// Latest analysis job per game, for the library badges. `null` = never analyzed.
+type LibraryStatus = Record<string, Job | null>;
+
+function useLibraryStatus(games: Game[] | null): LibraryStatus {
+  const [status, setStatus] = useState<LibraryStatus>({});
+  const ids = (games ?? []).map((g) => g.game_id).join(',');
+  const anyActive = Object.values(status).some((j) => !!j && !isTerminal(j));
+
+  useEffect(() => {
+    if (!ids) return;
+    const ctrl = new AbortController();
+    const refresh = async () => {
+      const entries = await Promise.all(
+        ids.split(',').map(async (id) => {
+          try {
+            const jobs = await api.listJobs(id, ctrl.signal);
+            return [id, jobs[jobs.length - 1] ?? null] as const;
+          } catch {
+            return null; // keep the previous badge on a transient error
+          }
+        }),
+      );
+      if (ctrl.signal.aborted) return;
+      setStatus((prev) => {
+        const next = { ...prev };
+        for (const e of entries) if (e) next[e[0]] = e[1];
+        return next;
+      });
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), anyActive ? 3000 : 15000);
+    return () => {
+      ctrl.abort();
+      window.clearInterval(timer);
+    };
+  }, [ids, anyActive]);
+
+  return status;
+}
+
+function libraryBadge(job: Job | null | undefined): { cls: string; text: string } {
+  if (job === undefined) return { cls: 'none', text: 'checking…' };
+  if (job === null) return { cls: 'none', text: 'not analyzed' };
+  if (job.status === 'succeeded') return { cls: 'succeeded', text: 'processed' };
+  if (job.status === 'running') return { cls: 'running', text: `processing · ${job.phase}` };
+  if (job.status === 'queued') return { cls: 'queued', text: 'waiting' };
+  return { cls: 'failed', text: 'failed' };
+}
+
 function App() {
   const [games, setGames] = useState<Game[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
@@ -36,6 +85,13 @@ function App() {
   };
 
   const selected = games?.find((g) => g.game_id === selectedId) ?? null;
+  const library = useLibraryStatus(games);
+  const jobsKnown = Object.values(library);
+  const counts = {
+    done: jobsKnown.filter((j) => j?.status === 'succeeded').length,
+    running: jobsKnown.filter((j) => j?.status === 'running').length,
+    waiting: jobsKnown.filter((j) => j?.status === 'queued').length,
+  };
 
   return (
     <div className="app">
@@ -71,11 +127,21 @@ function App() {
             ) : games.length === 0 ? (
               <p className="muted small">No games yet. Upload an authorized MP4 or load the sample.</p>
             ) : (
+              <>
+              <p className="library-summary small">
+                <span className="ok">{counts.done} processed</span> · <span className="info">{counts.running} processing</span> · <span>{counts.waiting} waiting</span>
+              </p>
               <ul className="game-list">
                 {[...games].reverse().map((g) => (
                   <li key={g.game_id}>
                     <button className={g.game_id === selectedId ? 'game active' : 'game'} onClick={() => setSelectedId(g.game_id)}>
-                      <strong>{g.title}</strong>
+                      <div className="game-title">
+                        <strong>{g.title}</strong>
+                        {(() => {
+                          const b = libraryBadge(library[g.game_id]);
+                          return <em className={`status ${b.cls}`}>{b.text}</em>;
+                        })()}
+                      </div>
                       <span>
                         {g.sport} · {formatMs(g.duration_ms)} · {g.width}×{g.height} · {Number(g.fps).toFixed(2)} fps
                       </span>
@@ -83,6 +149,7 @@ function App() {
                   </li>
                 ))}
               </ul>
+              </>
             )}
           </section>
         </aside>

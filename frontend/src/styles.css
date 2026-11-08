@@ -94,6 +94,12 @@ button.link { background: none; border: none; color: var(--accent-2); padding: 0
 .game { width: 100%; text-align: left; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; font-weight: 500; }
 .game strong { font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .game span { font-size: 0.72rem; color: var(--muted); }
+.game-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.game-title .status { font-style: normal; flex-shrink: 0; white-space: nowrap; }
+.status.none { color: var(--muted); border-color: var(--line); border-style: dashed; }
+.library-summary { margin: 0 0 8px; color: var(--muted); }
+.library-summary .ok { color: var(--ok); }
+.library-summary .info { color: var(--info); }
 .game.active { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
 
 .empty { display: grid; place-content: center; text-align: center; gap: 8px; min-height: 50vh; border: 1px dashed var(--line); border-radius: var(--radius); padding: 24px; color: var(--muted); }
