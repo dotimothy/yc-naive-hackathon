@@ -51,8 +51,6 @@ function App() {
         </div>
         <div className="topbar-meta">
           <span className="pill sport">Basketball</span>
-          <span className="pill">Prototype</span>
-          <span className="pill muted">Loopback Only · Footage Stays On This Machine</span>
         </div>
       </header>
       <div className="layout">
@@ -255,7 +253,7 @@ function GameRoom({ game }: { game: Game }) {
       {game.sample && (
         <p className="attribution small">
           Sample footage: <a href="https://github.com/open-starlab/TrackID3x3" target="_blank" rel="noreferrer">TrackID3x3</a> (Yamada et al.), licensed{' '}
-          <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>. Used for local prototype testing.
+          <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>.
         </p>
       )}
       {room.loadError && (
@@ -366,7 +364,7 @@ function JobPanel(props: {
       {!loaded && !job ? (
         <p className="muted small">Loading job history…</p>
       ) : !job ? (
-        <p className="muted small">No analysis yet. Click <b>Analyze Footage</b> to run player detection, pose, tracking and the available ball/hoop detector in one coordinated video pass. Models sample at their own intervals; this is offline analysis.</p>
+        <p className="muted small">No analysis yet. Click <b>Analyze Footage</b> to run player detection, pose, tracking and the available ball/hoop detector in one coordinated video pass.</p>
       ) : (
         <>
           <div className="job-line">

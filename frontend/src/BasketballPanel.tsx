@@ -142,7 +142,7 @@ export function BasketballPanel({ gameId, jobId, analysisActive, tracks, onSeek,
     {failed && <p className="alert warn">Ball/hoop analysis stopped before completion. Any observations below are partial; player analysis may continue. Run Analyze Footage again to retry both models.</p>}
     {error && <p className="alert error">{error}</p>}
     {currentRun?.error && <p className={unavailable ? 'alert warn' : 'alert error'}>{currentRun.error}</p>}
-    {unavailable && !currentRun?.error && <p className="alert warn">The optional local ball detector is unavailable. Player analysis can continue; no ball detections are claimed.</p>}
+    {unavailable && !currentRun?.error && <p className="alert warn">Ball detection is currently unavailable. Player analysis can continue; no ball detections are claimed.</p>}
     {stale && <p className="alert warn">Player identities have changed. Run Analyze Footage again before assigning these plays.</p>}
     {!report || unavailable ? <p className="muted small">{unavailable ? 'No ball/hoop evidence was generated for this job.' : active ? 'Processing the shared frame stream. Observations appear as frames are analyzed.' : 'Run Analyze Footage to collect player and ball/hoop evidence together.'}</p> : <>
       <dl className="metrics">

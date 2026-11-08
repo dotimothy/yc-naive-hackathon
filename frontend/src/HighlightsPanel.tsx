@@ -607,7 +607,7 @@ function HighlightsPanelInner({ gameId, jobId, analysisActive, onSeek, onUpdated
             </details>}
             <h4 className="hl-section">Reviewer-confirmed groups</h4>
             <p className="muted small">
-              Group track fragments only when you have checked the footage and they show the same person. Labels are private and local (e.g. <code>Jersey12</code>);
+              Group track fragments only when you have checked the footage and they show the same person. Labels are private (e.g. <code>Jersey12</code>);
               nothing is inferred, published or linked to a profile. Groups reset when a new analysis runs.
             </p>
             {roster.length > 0 && (

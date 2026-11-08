@@ -150,7 +150,7 @@ export function FilmPlayer({ game, videoRef, playheadMs, index, showBoxes, showP
             setVideoError(null);
             setNatural({ w: e.currentTarget.videoWidth, h: e.currentTarget.videoHeight });
           }}
-          onError={() => setVideoError('Source video could not be loaded from the local API.')}
+          onError={() => setVideoError('The video could not be loaded. Please try again.')}
         />
         <svg className="overlay" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
           {visibleObjects.map((o, i) => { const [x,y,w,h] = o.bbox; const color = o.class_name === 'basketball' ? '#ffe45c' : '#56e7ff'; return <g key={`object-${i}`}><rect x={x*W} y={y*H} width={w*W} height={h*H} fill="none" stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke"/><text x={x*W} y={Math.max(font,y*H-4)} fill={color} fontSize={font}>{o.class_name}?</text></g>; })}

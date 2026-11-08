@@ -132,7 +132,7 @@ export function LiveBoard(props: {
           <div className="board-tags">
             <span className={`game-state ${state.key}`}><i />{state.label}</span>
             <span className="board-sport">{game.sport}</span>
-            <span className={`stream ${props.streamState}`} title="Live update stream from the local API"><i />{props.streamState === 'live' ? 'Feed Live' : props.streamState === 'connecting' ? 'Connecting' : props.streamState === 'reconnecting' ? 'Reconnecting' : 'Feed Closed'}</span>
+            <span className={`stream ${props.streamState}`} title="Analysis updates"><i />{props.streamState === 'live' ? 'Feed Live' : props.streamState === 'connecting' ? 'Connecting' : props.streamState === 'reconnecting' ? 'Reconnecting' : 'Feed Closed'}</span>
           </div>
           <h2>{game.title}</h2>
           <p className="board-meta">

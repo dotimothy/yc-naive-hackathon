@@ -28,7 +28,7 @@ function detailMessage(body: unknown, status: number): string {
         .join('; ');
     }
   }
-  if (status === 0) return 'Local API unreachable. Is the backend running on 127.0.0.1:8000?';
+  if (status === 0) return 'Unable to connect. Please try again.';
   return `Request failed (HTTP ${status})`;
 }
 
