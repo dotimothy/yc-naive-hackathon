@@ -43,7 +43,7 @@ function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <BallMark />
+          <BrandMark />
           <div>
             <h1>PlayLattice</h1>
             <p>Film Room</p>
@@ -546,17 +546,8 @@ function ClipsPanel({ clips, events, job, onSeek }: { clips: Clip[]; events: Rec
   );
 }
 
-function BallMark() {
-  return (
-    <svg className="logo" viewBox="0 0 32 32" aria-hidden="true">
-      <circle cx="16" cy="16" r="14" fill="var(--accent)" />
-      <g fill="none" stroke="#1a0a00" strokeWidth="1.6">
-        <circle cx="16" cy="16" r="14" />
-        <path d="M2 16h28M16 2v28" />
-        <path d="M6.2 6.2c4.6 4.4 4.6 15.2 0 19.6M25.8 6.2c-4.6 4.4-4.6 15.2 0 19.6" />
-      </g>
-    </svg>
-  );
+function BrandMark() {
+  return <img className="logo" src="/favicon.png" width={48} height={48} alt="" aria-hidden="true" />;
 }
 
 function CourtArt() {

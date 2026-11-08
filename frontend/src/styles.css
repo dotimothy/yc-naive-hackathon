@@ -115,8 +115,7 @@ button.cta { font-size: 1.12rem; padding: 11px 28px; letter-spacing: 0.06em; }
 }
 .brand h1 { font-size: 1.6rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; font-style: italic; transform: skewX(-6deg); }
 .brand p { font-family: var(--display); font-weight: 700; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.32em; margin-top: 1px; opacity: 0.8; }
-.logo { width: 30px; height: 30px; flex: none; filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.25)); }
-.brand .logo circle:first-child { fill: #fff3e9; }
+.logo { width: 48px; height: 48px; object-fit: contain; flex: none; filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.25)); }
 .topbar-meta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 8px 0; }
 .pill { font-family: var(--display); font-weight: 700; font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase; border: 1px solid var(--line-strong); border-radius: 2px; padding: 3px 10px; background: var(--panel); }
 .pill.sport { border-color: var(--accent); color: var(--accent-2); }
