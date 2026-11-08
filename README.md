@@ -2,7 +2,7 @@
 
 Turn basketball footage into a film room with player tracking, ball and hoop observations, reviewable basketball stats, and source-linked highlight clips.
 
-PlayLattice is being built for the YC Naive Hackathon. The local video workflow works today; Naive SDK orchestration and sponsor integrations are next. Basketball is the first supported sport.
+PlayLattice is being built for the YC Naive Hackathon. The local video workflow works today; Naive SDK onboarding is set up with a capped agent and spending checks; connecting its tools to the local worker is next, followed by sponsor integrations. Basketball is the first supported sport.
 
 ![PlayLattice dashboard: basketball replay with tracking overlays, player highlight cards, and clip review](docs/assets/dashboard.gif)
 
@@ -65,7 +65,7 @@ This is sampled video analysis, not demonstrated real-time game coverage. Model 
 
 We benchmarked basketball-trained YOLOv8n against RF-DETR on the same 264 frames and three-view settings on MPS. YOLO took 9.2 seconds versus RF-DETR's 62.5 seconds, but detected balls in only 39 frames versus 164 and hoops in zero frames versus 264. These are **detection coverage and detector timings, not accuracy or full-job latency**. RF-DETR remains active. Adaptive crop and cross-frame batching experiments are archived and are not enabled in production analysis. [Benchmark details](docs/EBARD_MODEL_BENCHMARK.md).
 
-Player scores express clip-review priority, not player ability. Official statistics, verified rosters, private athlete profiles, automatic jersey identification, recruiting workflows, Naive orchestration and sponsor plugins are not implemented.
+Player scores express clip-review priority, not player ability. Official statistics, verified rosters, private athlete profiles, automatic jersey identification, recruiting workflows, full Naive tool orchestration and sponsor plugins are not implemented.
 
 ## Checks
 
@@ -78,6 +78,8 @@ npm --prefix frontend run build
 The current backend suite has 196 passing tests. UI readability was checked in desktop and mobile Chrome. Real-video inference and export checks are separate from unit tests; passing software checks does not establish basketball recognition accuracy.
 
 ## Further reading
+
+- [Naive SDK setup, approved budgets and monitoring](integrations/naive/README.md)
 
 - [Autonomous Phase 1 acceptance](docs/PHASE1_ACCEPTANCE.md)
 - **[Developer handoff and next priorities](docs/HANDOFF.md)**
