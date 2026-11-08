@@ -439,7 +439,13 @@ const countOf = (v: unknown): number | null =>
 
 /** Optional tracker review metadata; shown as counts to review, never as facts. */
 function TrackerReviewSummary({ report }: { report: Job['report'] & object }) {
-  const roles = countOf(report.role_flags);
+  const roleEntries = Array.isArray(report.role_flags)
+    ? report.role_flags
+    : report.role_flags && typeof report.role_flags === 'object' ? Object.values(report.role_flags) : null;
+  const roles = roleEntries?.filter((entry) => {
+    if (!entry || typeof entry !== 'object' || !('role_status' in entry)) return false;
+    return entry.role_status === 'review_required' || entry.role_status === 'likely_non_player';
+  }).length ?? null;
   const merges = countOf(report.merge_proposals);
   const summary = report.team_summary && typeof report.team_summary === 'object' ? report.team_summary : null;
   const teamReason = summary && typeof summary.reason === 'string' ? summary.reason.replace(/_/g, ' ') : null;
