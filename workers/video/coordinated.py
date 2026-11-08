@@ -4,11 +4,13 @@ import json
 import os
 from pathlib import Path
 import queue
+import signal
 import subprocess
 import threading
 import time
 
 from workers.video.pipeline import process_video
+from workers.video.cancellation import MARKER, check_cancelled
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -32,6 +34,9 @@ def optional_runtime():
 
 
 def run_analysis(source, output, options, emit):
+    output = Path(output)
+    options = dict(options, cancel_path=str(output / MARKER))
+    check_cancelled(options["cancel_path"])
     if not options.get("basketball"):
         return process_video(source, output, options, emit)
     python, reason = optional_runtime()
@@ -55,6 +60,7 @@ def run_analysis(source, output, options, emit):
             stderr=log,
             text=True,
             bufsize=1,
+            start_new_session=True,
             env=dict(os.environ, PYTORCH_ENABLE_MPS_FALLBACK="0"),
         )
 
@@ -78,13 +84,14 @@ def run_analysis(source, output, options, emit):
             )
             proc.stdin.flush()
             while True:
+                check_cancelled(options["cancel_path"])
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise subprocess.TimeoutExpired(proc.args, timeout)
                 try:
-                    line = messages.get(timeout=remaining)
+                    line = messages.get(timeout=min(0.25, remaining))
                 except queue.Empty:
-                    raise subprocess.TimeoutExpired(proc.args, timeout)
+                    continue
                 if line is None:
                     break
                 message = json.loads(line)
@@ -103,7 +110,10 @@ def run_analysis(source, output, options, emit):
             return result
         finally:
             if proc.poll() is None:
-                proc.kill()
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
                 proc.wait()
             proc.stdin.close()
             reader.join(timeout=1)

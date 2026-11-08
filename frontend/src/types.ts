@@ -16,7 +16,7 @@ export type Game = {
   sample?: boolean;
 };
 
-export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed';
+export type JobStatus = 'queued' | 'running' | 'cancelling' | 'cancelled' | 'succeeded' | 'failed';
 
 export type IdentityMergeSuggestion = {
   track_id: string; timestamp_ms: number; status: 'needs_review'; requires_review: true;
@@ -58,7 +58,7 @@ export type Job = {
   attempts: number;
   error: string | null;
   artifacts?: Artifact[];
-  report?: JobReport;
+  report?: JobReport | null;
 };
 
 export type Keypoint = { name: string; x: number; y: number; visibility: number; confidence?: number };

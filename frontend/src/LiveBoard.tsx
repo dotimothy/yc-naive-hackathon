@@ -27,6 +27,8 @@ function gameState(job: Job | null): GameState {
   if (!job) return { key: 'pregame', label: 'Pregame' };
   if (job.status === 'running') return { key: 'live', label: 'Analyzing' };
   if (job.status === 'queued') return { key: 'queued', label: 'Warming Up' };
+  if (job.status === 'cancelling') return { key: 'queued', label: 'Cancelling' };
+  if (job.status === 'cancelled') return { key: 'cancelled', label: 'Cancelled' };
   if (job.status === 'failed') return { key: 'failed', label: 'Failed' };
   return { key: 'final', label: 'Analyzed' };
 }
@@ -180,6 +182,10 @@ export function LiveBoard(props: {
           <p className="leaders-empty">
             {!job
               ? 'Run analysis to fill the board. Players appear here live as tracking streams in.'
+              : job.status === 'cancelled'
+              ? 'Analysis cancelled. Run analysis again to collect evidence.'
+              : job.status === 'cancelling'
+              ? 'Stopping analysis…'
               : job.status === 'failed'
               ? 'No tracking data: the analysis failed.'
               : 'Waiting for the first tracked frames…'}
@@ -234,6 +240,10 @@ function useHighlightBundle(gameId: string, job: Job | null, clipCount: number, 
 
   useEffect(() => {
     const controller = new AbortController();
+    if (job?.status === 'cancelled' || job?.status === 'cancelling') {
+      setBundle(null);
+      return () => controller.abort();
+    }
     api
       .highlights(gameId, controller.signal)
       .then((b) => setBundle(b))
@@ -248,5 +258,5 @@ function useHighlightBundle(gameId: string, job: Job | null, clipCount: number, 
     return () => window.clearInterval(timer);
   }, [pending]);
 
-  return bundle;
+  return job?.status === 'cancelled' || job?.status === 'cancelling' ? null : bundle;
 }

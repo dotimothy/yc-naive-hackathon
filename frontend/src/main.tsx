@@ -243,11 +243,12 @@ function GameRoom({ game }: { game: Game }) {
         streamState={room.streamState}
         delay={room.delayStats}
         onPick={(trackId, ms) => seekAndShow(ms, trackId)}
-        actions={
+        actions={<>
           <button className="cta" onClick={() => void room.startAnalysis()} disabled={room.starting || active || !room.loaded}>
-            {room.starting ? 'Submitting…' : active ? 'Analysis Running' : job ? 'Re-Run Analysis' : 'Analyze Footage'}
+            {room.starting ? 'Submitting…' : job?.status === 'cancelling' ? 'Cancelling…' : active ? 'Analysis Running' : job ? 'Re-Run Analysis' : 'Analyze Footage'}
           </button>
-        }
+          {active && <button className="secondary danger" onClick={() => void room.cancelAnalysis()} disabled={room.cancelling || job?.status === 'cancelling'}>{room.cancelling || job?.status === 'cancelling' ? 'Cancelling…' : 'Cancel Analysis'}</button>}
+        </>}
       />
 
       {game.sample && (
@@ -263,6 +264,8 @@ function GameRoom({ game }: { game: Game }) {
         </div>
       )}
       {room.startError && <div className="alert error">Could not start analysis: {room.startError}</div>}
+      {room.cancelError && <div className="alert error" role="alert">Could not cancel analysis: {room.cancelError}</div>}
+      {job?.status === 'cancelled' && <p className="alert warn" role="status">Analysis cancelled. Partial results were cleared. You can run analysis again.</p>}
       {room.streamState !== 'live' && room.streamState !== 'connecting' && (
         <div className="alert warn">Live update stream is {room.streamState === 'closed' ? 'closed' : 'reconnecting'}; job status falls back to polling. Data refreshes on reconnect.</div>
       )}
@@ -271,6 +274,7 @@ function GameRoom({ game }: { game: Game }) {
         <section className="panel film">
           <FilmPlayer game={game} videoRef={videoRef} playheadMs={playheadMs} index={index} showBoxes={showBoxes} showPose={showPose} selectedTrack={selectedTrack} objects={showObjects ? ballObjects : []} />
           <div className="controls">
+            {active && <button className="secondary small danger" onClick={() => void room.cancelAnalysis()} disabled={room.cancelling || job?.status === 'cancelling'}>{room.cancelling || job?.status === 'cancelling' ? 'Cancelling…' : 'Cancel Analysis'}</button>}
             <label className="toggle"><input type="checkbox" checked={showObjects} onChange={e => setShowObjects(e.target.checked)} /> Ball / hoop</label>
             <label className="toggle"><input type="checkbox" checked={showBoxes} onChange={(e) => setShowBoxes(e.target.checked)} /> Boxes</label>
             <label className="toggle"><input type="checkbox" checked={showPose} onChange={(e) => setShowPose(e.target.checked)} /> Pose (COCO-17)</label>
@@ -289,7 +293,7 @@ function GameRoom({ game }: { game: Game }) {
           </div>
           <div className="controls">
             <button className="secondary small" disabled={!selectedTrack || active || correcting} onClick={() => void correctIdentity()}>Split selected track at playhead</button>
-            <button className="ghost small" disabled={active || correcting || !job} onClick={() => void correctIdentity(true)}>Undo identity splits</button>
+            <button className="ghost small" disabled={active || correcting || job?.status !== 'succeeded'} onClick={() => void correctIdentity(true)}>Undo identity splits</button>
             <span className="fineprint">Select a track and seek to a swap. Splits snap to a sampled frame and clear saved player groups, reviews and highlight clips for this analysis.</span>
           </div>
           {correctionError && <div className="alert error">{correctionError}</div>}
@@ -321,9 +325,9 @@ function GameRoom({ game }: { game: Game }) {
         </div>
       </div>
 
-      <BasketballPanel refreshKey={highlightsRevision} gameId={game.game_id} jobId={job?.job_id ?? null} analysisActive={active} tracks={index.trackIds} onSeek={seekAndShow} onObjects={setBallObjects} onImported={() => { setHighlightsRevision(v => v + 1); refreshRoom(); }} />
+      <BasketballPanel analysisStatus={job?.status} refreshKey={highlightsRevision} gameId={game.game_id} jobId={job?.job_id ?? null} analysisActive={active} tracks={index.trackIds} onSeek={seekAndShow} onObjects={setBallObjects} onImported={() => { setHighlightsRevision(v => v + 1); refreshRoom(); }} />
 
-      <HighlightsPanel identityMergeSuggestions={job?.report?.identity_merge_suggestions} refreshKey={highlightsRevision} gameId={game.game_id} jobId={job?.job_id ?? null} analysisActive={active} onSeek={seekAndShow} onUpdated={() => { refreshRoom(); setHighlightsRevision(v => v + 1); }} getPlayheadMs={getPlayheadMs} />
+      {job?.status !== 'cancelled' && job?.status !== 'cancelling' && <HighlightsPanel identityMergeSuggestions={job?.report?.identity_merge_suggestions} refreshKey={highlightsRevision} gameId={game.game_id} jobId={job?.job_id ?? null} analysisActive={active} onSeek={seekAndShow} onUpdated={() => { refreshRoom(); setHighlightsRevision(v => v + 1); }} getPlayheadMs={getPlayheadMs} />}
 
       <ClipsPanel clips={clips} events={events} job={job} onSeek={seek} />
 
@@ -494,7 +498,7 @@ function ClipsPanel({ clips, events, job, onSeek }: { clips: Clip[]; events: Rec
       </div>
       {clips.length === 0 ? (
         <p className="muted small">
-          {!job ? 'Run analysis to render review clips.' : job.status === 'failed' ? 'No clips: the analysis failed.' : isTerminal(job) ? 'This job produced no clips.' : 'Clips render after tracking completes.'}
+          {!job ? 'Run analysis to render review clips.' : job.status === 'cancelled' ? 'Analysis cancelled. Run analysis again to generate clips.' : job.status === 'failed' ? 'No clips: the analysis failed.' : isTerminal(job) ? 'This job produced no clips.' : 'Clips render after tracking completes.'}
         </p>
       ) : (
         <div className="clips">

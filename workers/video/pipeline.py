@@ -23,6 +23,7 @@ from workers.video.identity import (
     propose_tracklet_merges,
 )
 from workers.video.basketball_pass import BasketballPass
+from workers.video.cancellation import check_cancelled
 from workers.video.highlights import build_highlights, render_highlights
 from workers.render.media import probe, render_clip, verify_clip, sha256
 
@@ -48,6 +49,13 @@ NAMES = [
 
 
 def process_video(source_path, output_dir, options, emit):
+    original_emit = emit
+
+    def emit(kind, payload):
+        check_cancelled(options.get("cancel_path"))
+        original_emit(kind, payload)
+
+    check_cancelled(options.get("cancel_path"))
     if options.get("sport", "basketball") != "basketball":
         raise ValueError("Only basketball is implemented")
     started = time.perf_counter()
@@ -116,6 +124,7 @@ def process_video(source_path, output_dir, options, emit):
     last_timestamp = -1
     try:
         while True:
+            check_cancelled(options.get("cancel_path"))
             ok = cap.grab()
             if not ok:
                 break

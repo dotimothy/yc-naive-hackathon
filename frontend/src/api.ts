@@ -97,6 +97,9 @@ export const api = {
   listJobs: (gameId: string, signal?: AbortSignal) =>
     request<Items<Job>>(`/api/games/${enc(gameId)}/jobs`, { signal }).then((r) => r.items),
 
+  cancelAnalysis: (jobId: string, signal?: AbortSignal) =>
+    request<Job>(`/api/jobs/${enc(jobId)}/cancel`, { method: 'POST', signal }),
+
   getJob: (jobId: string, signal?: AbortSignal) => request<Job>(`/api/jobs/${enc(jobId)}`, { signal }),
 
   tracks: (gameId: string, signal?: AbortSignal) =>

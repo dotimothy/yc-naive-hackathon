@@ -1,6 +1,7 @@
 import { request } from './api';
 import { useEffect, useRef, useState } from 'react';
 import { formatMs } from './FilmPlayer';
+import type { JobStatus } from './types';
 
 export type BallObject = { timestamp_ms: number; class_name: string; bbox: [number, number, number, number]; confidence: number };
 type Proposal = { candidate_id: string; start_ms: number; end_ms: number; approach_ms: number; evidence_quality: number };
@@ -27,10 +28,10 @@ type BallRun = {
   report?: BallReport | null;
 };
 type ObjectResponse = { items: BallObject[]; run_id?: string; parent_job_id?: string };
-const RUNNING = new Set(['queued', 'running']);
+const RUNNING = new Set(['queued', 'running', 'cancelling']);
 
-export function BasketballPanel({ gameId, jobId, analysisActive, tracks, onSeek, onObjects, onImported, refreshKey }: {
-  refreshKey?: number; gameId: string; jobId: string | null; analysisActive: boolean; tracks: { id: string; playerLabel?: string }[];
+export function BasketballPanel({ gameId, jobId, analysisActive, analysisStatus, tracks, onSeek, onObjects, onImported, refreshKey }: {
+  analysisStatus?: JobStatus; refreshKey?: number; gameId: string; jobId: string | null; analysisActive: boolean; tracks: { id: string; playerLabel?: string }[];
   onSeek: (ms: number) => void; onObjects: (objects: BallObject[]) => void; onImported: () => void;
 }) {
   const path = `/api/games/${encodeURIComponent(gameId)}/basketball`;
@@ -53,6 +54,7 @@ export function BasketballPanel({ gameId, jobId, analysisActive, tracks, onSeek,
   // Reports and observations belong to one parent job. An aborted old request must never
   // put the previous video's objects back after the user changes games or starts a rerun.
   useEffect(() => {
+    if (analysisStatus === 'cancelled' || analysisStatus === 'cancelling') onObjects([]);
     const controller = new AbortController();
     let timer: number | undefined;
     const load = async () => {
@@ -67,7 +69,7 @@ export function BasketballPanel({ gameId, jobId, analysisActive, tracks, onSeek,
           objectRun.current = next.run_id;
           onObjects([]);
         }
-        if (current && (RUNNING.has(next.status) || next.status === 'succeeded')) {
+        if (current && analysisStatus !== 'cancelled' && analysisStatus !== 'cancelling' && next.status !== 'cancelling' && (RUNNING.has(next.status) || next.status === 'succeeded')) {
           const objects = await request<ObjectResponse>(`${path}/objects`, { signal: controller.signal });
           if (controller.signal.aborted) return;
           // New backends return scope metadata; retain compatibility with older item-only responses.
@@ -90,7 +92,7 @@ export function BasketballPanel({ gameId, jobId, analysisActive, tracks, onSeek,
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [path, jobId, analysisActive, refreshKey, onObjects]);
+  }, [path, jobId, analysisActive, analysisStatus, refreshKey, onObjects]);
 
   // A new run or correction revision needs a fresh actor choice and confirmation.
   useEffect(() => {
@@ -125,7 +127,9 @@ export function BasketballPanel({ gameId, jobId, analysisActive, tracks, onSeek,
   };
 
   const currentRun = run?.parent_job_id === jobId && jobId !== null ? run : null;
-  const report = currentRun?.report;
+  const cancelled = analysisStatus === 'cancelled' || currentRun?.status === 'cancelled';
+  const stopping = analysisStatus === 'cancelling' || currentRun?.status === 'cancelling';
+  const report = cancelled || stopping ? null : currentRun?.report;
   const active = analysisActive || !!currentRun && RUNNING.has(currentRun.status);
   const stale = !!currentRun?.identity_stale;
   const proposals = report?.shot_candidates ?? [];
@@ -133,7 +137,7 @@ export function BasketballPanel({ gameId, jobId, analysisActive, tracks, onSeek,
   const unavailable = currentRun?.status === 'unavailable';
   const failed = currentRun?.status === 'failed';
   const legacy = !!report && currentRun?.integrated !== true && report.integrated !== true;
-  const stateLabel = unavailable ? 'Detector unavailable' : failed ? 'Ball detector failed' : active ? legacy ? 'Ball detection running' : 'Analyzing with players' : currentRun?.status === 'succeeded' ? legacy ? 'Earlier pass complete' : 'Analysis complete' : 'Awaiting analysis';
+  const stateLabel = cancelled ? 'Cancelled' : stopping ? 'Cancelling…' : unavailable ? 'Detector unavailable' : failed ? 'Ball detector failed' : active ? legacy ? 'Ball detection running' : 'Analyzing with players' : currentRun?.status === 'succeeded' ? legacy ? 'Earlier pass complete' : 'Analysis complete' : 'Awaiting analysis';
 
   return <section className="panel basketball-panel">
     <div className="panel-head"><h3>Ball & Hoop Evidence</h3><span className={`status ${failed ? 'failed' : currentRun?.status === 'succeeded' ? 'succeeded' : active ? 'running' : ''}`}>{stateLabel}</span></div>
@@ -144,7 +148,7 @@ export function BasketballPanel({ gameId, jobId, analysisActive, tracks, onSeek,
     {currentRun?.error && <p className={unavailable ? 'alert warn' : 'alert error'}>{currentRun.error}</p>}
     {unavailable && !currentRun?.error && <p className="alert warn">Ball detection is currently unavailable. Player analysis can continue; no ball detections are claimed.</p>}
     {stale && <p className="alert warn">Player identities have changed. Run Analyze Footage again before assigning these plays.</p>}
-    {!report || unavailable ? <p className="muted small">{unavailable ? 'No ball/hoop evidence was generated for this job.' : active ? 'Processing the shared frame stream. Observations appear as frames are analyzed.' : 'Run Analyze Footage to collect player and ball/hoop evidence together.'}</p> : <>
+    {!report || unavailable ? <p className="muted small">{cancelled ? 'Analysis cancelled. Partial ball/hoop results were cleared.' : stopping ? 'Stopping the shared analysis worker…' : unavailable ? 'No ball/hoop evidence was generated for this job.' : active ? 'Processing the shared frame stream. Observations appear as frames are analyzed.' : 'Run Analyze Footage to collect player and ball/hoop evidence together.'}</p> : <>
       <dl className="metrics">
         <div><dt>Frames with ball detections</dt><dd>{report.frames_with_ball}/{report.processed_frames}</dd></div>
         <div><dt>Stable hoop proposals</dt><dd>{hoops.length}</dd></div>
