@@ -545,3 +545,6 @@ button.link.inline { padding: 0; font-size: inherit; }
 .sponsor-footer a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .sponsor-footer a span { color: var(--accent); }
 @media (max-width: 520px) { .sponsor-footer { padding: 18px 16px; } }
+
+.sponsor-footer a img { object-fit:contain; flex-shrink:0; }
+.sponsor-footer .sponsor-yc { font-size:0.8rem; color:var(--accent-2); }

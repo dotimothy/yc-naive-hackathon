@@ -208,8 +208,10 @@ function App() {
       <footer className="sponsor-footer" aria-label="Sponsor Acknowledgements">
         <div><strong>Sponsor Technologies</strong><span>With Thanks To Our Hackathon Sponsors</span></div>
         <nav aria-label="Sponsor Websites">
-          <a href="https://usenaive.ai/docs/sdk/typescript" target="_blank" rel="noopener noreferrer">Naive SDK <span aria-hidden="true">↗</span></a>
-          <a href="https://www.agentmail.to/" target="_blank" rel="noopener noreferrer">AgentMail <span aria-hidden="true">↗</span></a>
+          <a href="https://usenaive.ai/docs/sdk/typescript" target="_blank" rel="noopener noreferrer"><img src="/sponsors/naive.svg" width={30} height={30} alt="" /> Naive SDK <span aria-hidden="true">↗</span></a>
+          <a href="https://www.agentmail.to/" target="_blank" rel="noopener noreferrer"><img src="/sponsors/agentmail.svg" width={143} height={27} alt="AgentMail" /><span aria-hidden="true">↗</span></a>
+          <a className="sponsor-yc" href="https://www.ycombinator.com/companies/agentmail" target="_blank" rel="noopener noreferrer">A YC Company</a>
+          <a href="mailto:playlattice@agentmail.to?subject=Basketball%20Video%20Recommendations">Email For Recommendations ↗</a>
         </nav>
       </footer>
     </div>

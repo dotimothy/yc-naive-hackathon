@@ -54,3 +54,15 @@ body{font-family:var(--body)}
 .panel h2{font-family:var(--display);font-weight:700;letter-spacing:.03em}
 .company-close h2{font:italic 800 clamp(34px,4vw,52px)/1.05 var(--display)}
 @media(max-width:760px){.company-title{font-size:clamp(58px,15vw,84px)}.company-hero h1{font-size:clamp(36px,10vw,54px)}.company-tagline{font-size:13px;letter-spacing:.17em}.company-description{font-size:16px}.company-loop{font-size:11px}.company-nav nav a{font-size:14px}}
+
+.sponsor-section { display:flex; flex-direction:column; gap:24px; margin-top:24px; }
+.sponsor-section h2 { font-size:30px; margin:8px 0; }
+.sponsor-logos { display:flex; flex-wrap:wrap; align-items:center; gap:28px 48px; }
+.sponsor-brand { display:inline-flex; align-items:center; gap:12px; text-decoration:none; font:700 26px var(--display); color:var(--text); }
+.sponsor-brand img { display:block; object-fit:contain; }
+.sponsor-agentmail { display:flex; align-items:center; flex-wrap:wrap; gap:16px; }
+.yc-company { border:1px solid var(--line-strong); padding:6px 10px; font-size:12px; color:var(--accent-2); text-decoration:none; }
+.sponsor-email { padding-top:24px; border-top:1px solid var(--line); }
+.sponsor-email h3 { margin:0 0 8px; }
+.sponsor-email p { color:var(--muted); margin:0 0 16px; }
+.sponsor-address { display:inline-block; margin:12px; font-size:14px; }
