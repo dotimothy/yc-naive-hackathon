@@ -262,6 +262,7 @@ def build_plan(snapshot, max_players=6):
         profile=PROFILE,
         job_id=job,
         source_sha256=snapshot["source_sha256"],
+        attribution=snapshot.get("attribution", "TrackID3x3, CC BY 4.0"),
         segments=segments,
         quiz_candidates=quizzes,
         warnings=[
@@ -343,6 +344,7 @@ def draw_frame(
     replay_number=1,
     replay_count=1,
     countdown=None,
+    attribution="TrackID3x3, CC BY 4.0",
 ):
     fh, fw = frame.shape[:2]
     sample = focus_sample(segment["samples"], timestamp)
@@ -432,7 +434,7 @@ def draw_frame(
     text(
         d,
         (24, HEIGHT - 44),
-        "Player labels provisional  |  TrackID3x3, CC BY 4.0",
+        "Player labels provisional  |  " + attribution,
         17,
         color="#adb8c8",
         width=80,
@@ -545,6 +547,7 @@ def render_portrait(
                 number + 1,
                 len(plan["segments"]),
                 countdown,
+                plan.get("attribution", "Source attribution in caption"),
             )
             process.stdin.write(canvas.tobytes())
             last_segment = number

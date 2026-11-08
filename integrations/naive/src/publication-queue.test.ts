@@ -18,3 +18,6 @@ test('explicit existing-job inclusion permits one format-corrected retest; termi
 test('publication fee reservation is idempotent and cannot exceed the per-video budget',()=>{
  const s=store();try{s.reservePublication('j',PORTRAIT_PROFILE);s.reservePublication('j',PORTRAIT_PROFILE);assert.equal(s.get('j').reserved,43000);const r=s.get('j');r.reserved=999000;s.save(r);assert.throws(()=>s.reservePublication('j','another-profile'),/per-video/);assert.equal(s.get('j').reserved,999000);}finally{s.close();}
 });
+test('overnight cutoff blocks included jobs and malformed deadlines',async()=>{
+ const s=store();try{let called=0;for(const stop_at of ['2000-01-01T00:00:00Z','invalid'])await publicationTick(s,{...policy,include_job_ids:['j'],stop_at},async()=>{called++;});assert.equal(called,0);}finally{s.close();}
+});

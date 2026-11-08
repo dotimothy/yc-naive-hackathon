@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout } from 'node:timers/promises';
 import { naiveClient,safeError } from './client.js';
 import { WorkflowStore } from './analysis-store.js';
-import { publicTikTokTestPost,selectTestWorkflow } from './publish-contract.js';
+import {publishingSource} from './publishing-sources.js';
 import {frameRate} from './tiktok-media.js';
 import {portraitExport,PORTRAIT_PROFILE} from './portrait-export.js';
 const folder=fileURLToPath(new URL('../../../data/naive/',import.meta.url));
@@ -16,20 +16,20 @@ try {
  const jobFlag=process.argv.indexOf('--job');
  const requestedJob=jobFlag>=0?process.argv[jobFlag+1]:undefined;
  if(jobFlag>=0&&!requestedJob)throw new Error('--job requires an ID');
- const workflow=selectTestWorkflow(requestedJob?[store.get(requestedJob)].filter(Boolean):store.all());
+ const workflow=(requestedJob?[store.get(requestedJob)].filter(Boolean):store.all()).find(r=>r.state==='succeeded'&&r.output?.clips?.length&&publishingSource(r.output.source_sha256));
  if(!workflow)throw new Error('No completed crew workflow with clips');
  const assertActive=()=>{if(store.get(workflow.job_id)?.publication?.cancel_requested)throw new Error('Publication cancellation requested');};
  assertActive();
  const selected=workflow.output.clips[0];
- publicTikTokTestPost('fil_preflight',selected,workflow.output.source_sha256);
+ const attribution=publishingSource(workflow.output.source_sha256);if(!attribution)throw new Error('Source is not authorized for publishing');
  const current=await read(`/api/games/${encodeURIComponent(workflow.game_id)}/jobs`);
  if(current.items.at(-1)?.job_id!==workflow.job_id||current.items.at(-1)?.status!=='succeeded')throw new Error('Source analysis was superseded');
  const clips=await read(`/api/games/${encodeURIComponent(workflow.game_id)}/clips`);
  const clip=clips.items.find((c:any)=>c.clip_id===selected.clip_id);
  if(!clip||clip.job_id!==workflow.job_id||clip.qa_status!=='passed'||!clip.decoded||clip.source_sha256!==workflow.output.source_sha256||clip.source_start_ms!==selected.source_start_ms||clip.source_end_ms!==selected.source_end_ms||!/^\/api\/media\/[a-zA-Z0-9_-]+$/.test(clip.uri))throw new Error('Clip provenance no longer matches');
  const response=await fetch(base+clip.uri,{redirect:'error',signal:AbortSignal.timeout(20000)});
- if(!response.ok||Number(response.headers.get('content-length'))>10*1024*1024)throw new Error('Source media unavailable or oversized');
- const sourceBytes=new Uint8Array(await response.arrayBuffer());if(sourceBytes.length>10*1024*1024)throw new Error('Source media exceeds test limit');
+ if(!response.ok||Number(response.headers.get('content-length'))>250*1024*1024)throw new Error('Source media unavailable or oversized');
+ const sourceBytes=new Uint8Array(await response.arrayBuffer());if(sourceBytes.length>250*1024*1024)throw new Error('Source media exceeds test limit');
  if(createHash('sha256').update(sourceBytes).digest('hex')!==clip.sha256)throw new Error('Source clip hash mismatch');
  const prepared=await portraitExport(workflow.job_id,workflow.game_id,selected,base);
  console.log(JSON.stringify({event:'publishing_media_ready',profile:PORTRAIT_PROFILE,players:prepared.recipe.track_count,quizzes:prepared.recipe.quiz_count,music_missing:prepared.recipe.quiz_music_missing,output_fps:frameRate(prepared.metadata.streams.find(s=>s.codec_type==='video')?.avg_frame_rate),sha256:prepared.sha256}));
@@ -73,7 +73,7 @@ try {
   }
   await save();console.log(JSON.stringify({event:'media_uploaded',file_id:state.file_id}));
  }
- if(!state.body){state.body=publicTikTokTestPost(state.file_id,selected,workflow.output.source_sha256);state.body.content=`PlayLattice: ${prepared.recipe.track_count} player-focused replays and ${prepared.recipe.quiz_count} prediction quizzes. Captions describe observed movement; player labels are provisional.\n\nSource: TrackID3x3, Kazuhiro Yamada et al. https://github.com/open-starlab/TrackID3x3\nCC BY 4.0: https://creativecommons.org/licenses/by/4.0/\nCropped, captioned and sequenced by PlayLattice. Original quiz music: ${prepared.recipe.quiz_music_title}.`;}
+ if(!state.body){state.body={platforms:['tiktok'],file_ids:[state.file_id],title:'PlayLattice player breakdown'};state.body.content=`PlayLattice: ${prepared.recipe.track_count} player-focused replays and ${prepared.recipe.quiz_count} prediction quizzes. Captions describe observed movement; player labels are provisional.\n\nSource: ${attribution.credit} ${attribution.source_url}\nCropped, captioned and sequenced by PlayLattice. Original quiz music: ${prepared.recipe.quiz_music_title}.`;}
  if('visibility' in state.body||state.body.platforms.length!==1||state.body.platforms[0]!=='tiktok')throw new Error('Stored publication policy is not the authorized public TikTok request');
  await save();
  if(!state.post_id) {

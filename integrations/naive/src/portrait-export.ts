@@ -6,6 +6,7 @@ import {fileURLToPath} from 'node:url';
 import {join,extname} from 'node:path';
 import {clipperQuizSelection,QUIZ_MUSIC} from './clipper-quizzes.js';
 import {probeMedia,validateTikTokMedia} from './tiktok-media.js';
+import {publishingSource} from './publishing-sources.js';
 import {WorkflowStore} from './analysis-store.js';
 export const PORTRAIT_PROFILE='player-portrait-quiz-v1';
 const root=fileURLToPath(new URL('../../../',import.meta.url));
@@ -20,13 +21,13 @@ export async function portraitExport(jobId:string,gameId:string,selected:any,bas
  const game=games.items.find((g:any)=>g.game_id===gameId),job=jobs.items.at(-1);
  if(!game||job?.job_id!==jobId||job.status!=='succeeded'||highlights.job_id!==jobId||shots.job_id!==jobId||game.source_sha256!==job.report?.source_sha256)throw new Error('Portrait evidence spans different analyses');
  if(!/^\/api\/media\/[a-zA-Z0-9_-]+$/.test(game.source_uri))throw new Error('Unregistered source URI');
- const snapshot:any={job_id:jobId,game_id:gameId,source_sha256:game.source_sha256,selected,tracks:tracks.items,candidates:highlights.candidates,shots:shots.items};
+ const snapshot:any={job_id:jobId,game_id:gameId,source_sha256:game.source_sha256,selected,attribution:publishingSource(game.source_sha256)?.footer||'Source attribution in caption',tracks:tracks.items,candidates:highlights.candidates,shots:shots.items};
  const hash=digest(JSON.stringify(snapshot));
  const folder=join(data,'portrait-exports',jobId,hash.slice(0,20));await mkdir(folder,{recursive:true});
  const source=join(data,'portrait-exports','source-'+game.source_sha256+'.mp4');
  let sourceBytes:Uint8Array|undefined;
  try{const bytes=await readFile(source);if(digest(bytes)===game.source_sha256)sourceBytes=bytes;}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;}
- if(!sourceBytes){const response=await fetch(new URL(game.source_uri,origin),{redirect:'error',signal:AbortSignal.timeout(20000)});if(!response.ok||Number(response.headers.get('content-length'))>50*1024*1024)throw new Error('Portrait source is unavailable or too large');const bytes=new Uint8Array(await response.arrayBuffer());if(bytes.length>50*1024*1024||digest(bytes)!==game.source_sha256)throw new Error('Portrait source hash mismatch');await writeFile(source,bytes,{mode:0o600});}
+ if(!sourceBytes){const response=await fetch(new URL(game.source_uri,origin),{redirect:'error',signal:AbortSignal.timeout(20000)});if(!response.ok||Number(response.headers.get('content-length'))>250*1024*1024)throw new Error('Portrait source is unavailable or too large');const bytes=new Uint8Array(await response.arrayBuffer());if(bytes.length>250*1024*1024||digest(bytes)!==game.source_sha256)throw new Error('Portrait source hash mismatch');await writeFile(source,bytes,{mode:0o600});}
  snapshot.source_path=source;await writeFile(join(folder,'snapshot.json'),JSON.stringify(snapshot),{mode:0o600});
  const run=async(args:string[],outputFolder=folder)=>promisify(execFile)(python,[bridge,'--snapshot',join(folder,'snapshot.json'),'--output-dir',outputFolder,...args],{cwd:root,timeout:180000,maxBuffer:2*1024*1024});
  await run(['--plan-only']);const plan=JSON.parse(await readFile(join(folder,'plan.json'),'utf8'));

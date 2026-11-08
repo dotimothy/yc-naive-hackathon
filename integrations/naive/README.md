@@ -133,7 +133,7 @@ Prepare and validate without posting (this may call the existing clipper agent w
 npm run publish:test -- --job JOB_ID --prepare-only
 ```
 
-Prepared media use distinct upload/post journals so old low-FPS files are never silently reused. Existing posts are reconciled before creating another. New root tasks request $0.95; the publishing fee is transactionally reserved within the approved $1/video and monthly allocation. The queue suppresses terminal failures and waits for confirmed receipts; current activation is limited to the known attributed test source.
+Prepared media use distinct upload/post journals so old low-FPS files are never silently reused. Existing posts are reconciled before creating another. New root tasks request $0.95; the publishing fee is transactionally reserved within the approved $1/video and monthly allocation. The queue suppresses terminal failures and waits for confirmed receipts; activation is limited to source hashes in the local authorized-source registry.
 
 The corrected clip has been publicly verified on [@playlatticeai](https://www.tiktok.com/@playlatticeai/video/7705703545487527182). See [workflow acceptance](../../docs/NAIVE_WORKFLOW_ACCEPTANCE.md) for measured results and remaining scope limits.
 
@@ -142,3 +142,7 @@ The corrected clip has been publicly verified on [@playlatticeai](https://www.ti
 The active publishing profile is `player-portrait-quiz-v1`: 720×1280 at 30 FPS, player-following crops, full-court inset, burned-in movement captions and five-second prediction pauses. The existing clipper selects validated same-shot quiz candidates and an original cue from a three-cue music catalog. Music plays only during the choices and fades before action resumes. No supplied song is required. These quizzes predict tracked screen movement, not unverified basketball outcomes.
 
 Local previews are served by the analysis dispatcher at `http://127.0.0.1:8011/previews/JOB_ID`, with `/video`, `/manifest` and `/music` resources. The preview waits for an answer; exported social videos use a timed countdown. See [portrait handoff](../../docs/PORTRAIT_QUIZ_HANDOFF.md).
+
+### Overnight Drive processing and live dashboard
+
+The operator-authorized stationary-camera Drive queue expands publication beyond the original test hash through a private hash-bound source registry, preserving each source's own credit. The overnight runner reuses cached analysis, skips ineligible evidence, and stops new work/publication at the configured deadline or existing spend limits. Open the main UI's **Naive Crew** tab (`http://127.0.0.1:5173/#naive`); its `/naive-api/pipeline` proxy reads the dispatcher's live `/pipeline` feed. See [overnight operations](../../docs/OVERNIGHT_NAIVE_PIPELINE.md) for scope, logs, restart/stop and verified posts.
