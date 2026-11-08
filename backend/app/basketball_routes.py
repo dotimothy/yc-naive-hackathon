@@ -2,15 +2,10 @@
 
 from copy import deepcopy
 import json
-import os
 from pathlib import Path
-import subprocess
-import time
 from typing import Optional
-import uuid
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
-from workers.video.runtime import select_device
 from workers.video.highlights import summarize, clear_clips
 from backend.app.highlight_routes import bundle_for, public_highlights, assert_editable
 
@@ -24,7 +19,12 @@ def store():
 
 
 def latest(game_id):
-    jobs = [j for j in store().all_records("basketball_job") if j["game_id"] == game_id]
+    parent = store().latest_job_id(game_id)
+    jobs = [
+        j
+        for j in store().all_records("basketball_job")
+        if j["game_id"] == game_id and j.get("parent_job_id") == parent
+    ]
     return max(jobs, key=lambda j: j["created_at"]) if jobs else None
 
 
@@ -38,84 +38,6 @@ def public(job):
         "identity_revision", 0
     ) != store().identity_revision(job.get("parent_job_id"))
     return result
-
-
-def set_state(id, **changes):
-    s = store()
-    job = s.get("basketball_job", id)
-    job.update(changes)
-    s.put("basketball_job", id, job)
-    s.update(
-        job["game_id"], job.get("parent_job_id"), "basketball.updated", public(job)
-    )
-    return job
-
-
-def run(id):
-    s = store()
-    job = s.get("basketball_job", id)
-    out = Path(job["output_dir"])
-    out.mkdir(parents=True, exist_ok=True)
-    set_state(id, status="running")
-    try:
-        options = job["options"]
-        python = os.environ.get(
-            "SCOUTFILM_BALL_PYTHON", str(s.ROOT / ".venv-ball/bin/python")
-        )
-        command = [
-            python,
-            str(s.ROOT / "scripts/analyze_basketball.py"),
-            job["source_path"],
-            "--output",
-            str(out),
-            "--device",
-            options["device"],
-            "--stride",
-            str(options["stride"]),
-            "--ball-confidence",
-            str(options["ball_confidence"]),
-            "--hoop-confidence",
-            str(options["hoop_confidence"]),
-            "--limit-seconds",
-            str(options["max_seconds"]),
-        ]
-        if job.get("parent_job_id"):
-            samples = s.corrected_samples(job["parent_job_id"])
-            evidence = out / "players"
-            evidence.mkdir(exist_ok=True)
-            (evidence / "tracks.json").write_text(json.dumps(samples))
-            (evidence / "report.json").write_text(
-                json.dumps(dict(source_sha256=job["source_sha256"]))
-            )
-            command.extend(["--players", str(evidence / "tracks.json")])
-        with (out / "worker.log").open("w") as log:
-            subprocess.run(
-                command,
-                cwd=s.ROOT,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                timeout=900,
-                check=True,
-            )
-        report = json.loads((out / "report.json").read_text())
-        if report["source_sha256"] != job["source_sha256"]:
-            raise ValueError("Ball evidence source mismatch")
-        set_state(id, status="succeeded", report=report, error=None)
-        if job.get("parent_job_id"):
-            s.audit(
-                job["game_id"],
-                job["parent_job_id"],
-                "basketball_evidence_generated",
-                "succeeded",
-            )
-    except Exception as exc:
-        set_state(
-            id,
-            status="failed",
-            error="Ball/hoop worker failed ("
-            + type(exc).__name__
-            + "). Check the local worker log and optional detector setup.",
-        )
 
 
 class Analysis(BaseModel):
@@ -135,11 +57,15 @@ def get_report(game_id: str):
         public(job)
         if job
         else dict(
-            run_id=None,
-            status="not_analyzed",
+            run_id=s.latest_job_id(game_id),
+            status="running"
+            if s.latest_job_id(game_id)
+            and s.get("job", s.latest_job_id(game_id))["status"]
+            in ("queued", "running")
+            else "not_analyzed",
             error=None,
             report=None,
-            parent_job_id=None,
+            parent_job_id=s.latest_job_id(game_id),
         )
     )
 
@@ -150,84 +76,9 @@ def analyze(
     body: Analysis,
     idempotency_key: str = Header(..., min_length=1, max_length=200),
 ):
-    s = store()
-    with s.LOCK:
-        game = s.get("game", game_id)
-        parent = s.latest_job_id(game_id)
-        if parent and s.get("job", parent)["status"] != "succeeded":
-            raise HTTPException(409, "Finish pose analysis before ball/hoop analysis")
-        if any(
-            b["job_id"] == parent and b["status"] in ("queued", "running")
-            for b in s.all_records("highlights")
-        ):
-            raise HTTPException(409, "Wait for highlight generation")
-        try:
-            device = select_device(body.device)
-        except ValueError as exc:
-            raise HTTPException(422, str(exc))
-        interpreter = Path(
-            os.environ.get(
-                "SCOUTFILM_BALL_PYTHON", str(s.ROOT / ".venv-ball/bin/python")
-            )
-        )
-        if not interpreter.is_file():
-            raise HTTPException(
-                503,
-                "Set up the optional detector first: scripts/setup_ball_detector.sh",
-            )
-        if not (s.ROOT / "data/models/ebard-rfdetr-nano-state.pth").is_file():
-            raise HTTPException(
-                503,
-                "Download the pinned basketball model first: scripts/download_basketball_model.py",
-            )
-        options = body.model_dump()
-        options["device"] = device
-        serialized = json.dumps(
-            dict(
-                options=options,
-                parent_job_id=parent,
-                identity_revision=s.identity_revision(parent),
-            ),
-            sort_keys=True,
-        )
-        request_scope = game_id + ":basketball"
-        with s.connect() as db:
-            row = db.execute(
-                "SELECT job_id,body FROM requests WHERE game_id=? AND key=?",
-                (request_scope, idempotency_key),
-            ).fetchone()
-            if row:
-                if row["body"] != serialized:
-                    raise HTTPException(
-                        409,
-                        "Request key already used with different ball analysis settings",
-                    )
-                return public(s.get("basketball_job", row["job_id"]))
-            active = latest(game_id)
-            if active and active["status"] in ("queued", "running"):
-                return public(active)
-            id = uuid.uuid4().hex
-            job = dict(
-                run_id=id,
-                game_id=game_id,
-                parent_job_id=parent,
-                identity_revision=s.identity_revision(parent),
-                source_sha256=game["source_sha256"],
-                source_path=game["path"],
-                created_at=time.time(),
-                status="queued",
-                error=None,
-                report=None,
-                options=options,
-                output_dir=str(s.DATA / "processed" / "basketball" / id),
-            )
-            s.put("basketball_job", id, job)
-            db.execute(
-                "INSERT INTO requests VALUES(?,?,?,?)",
-                (request_scope, idempotency_key, id, serialized),
-            )
-        s.POOL.submit(run, id)
-        return public(job)
+    raise HTTPException(
+        410, "Ball and player analysis now run together. Use Analyze footage."
+    )
 
 
 @router.get("/objects")
@@ -235,15 +86,32 @@ def objects(game_id: str):
     s = store()
     s.get("game", game_id)
     job = latest(game_id)
-    if not job or job["status"] != "succeeded":
-        return {"items": []}
+    if not job or job["status"] not in ("running", "succeeded"):
+        return {
+            "items": [],
+            "run_id": job.get("run_id") if job else None,
+            "parent_job_id": s.latest_job_id(game_id),
+        }
+    if job.get("integrated") and job["status"] == "running":
+        return {
+            "run_id": job["run_id"],
+            "parent_job_id": job["parent_job_id"],
+            "items": [
+                o
+                for b in s.all_records("basketball_batch")
+                if b["job_id"] == job["parent_job_id"]
+                for o in b["items"]
+            ],
+        }
     path = Path(job["output_dir"]) / "objects.json"
     return {
+        "run_id": job["run_id"],
+        "parent_job_id": job["parent_job_id"],
         "items": [
             o
             for o in json.loads(path.read_text())
             if o["class_name"] in ("basketball", "hoop")
-        ]
+        ],
     }
 
 

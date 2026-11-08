@@ -128,6 +128,7 @@ export type GameEvent = {
 export type Envelope =
   | EnvelopeOf<'job.updated', Job>
   | EnvelopeOf<'tracks.batch', TracksBatch>
+  | EnvelopeOf<'analysis.progress', AnalysisProgress>
   | EnvelopeOf<'clip.updated', Clip>
   | EnvelopeOf<'event.created', GameEvent>
   | EnvelopeOf<'audit.created', unknown>
@@ -140,6 +141,14 @@ type EnvelopeOf<K extends string, P> = {
   job_id: string | null;
   payload: P;
   server_timestamp_ms: number;
+};
+
+export type AnalysisProgress = {
+  processed_frames?: number;
+  basketball_processed_frames?: number;
+  source_timestamp_ms: number;
+  source_frame?: number;
+  attempt?: number;
 };
 
 export type TracksBatch = {

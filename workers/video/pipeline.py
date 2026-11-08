@@ -1,6 +1,7 @@
 """Deterministic local inference worker, isolated from API and persistence."""
 
 import json
+import logging
 import os
 import time
 from pathlib import Path
@@ -15,6 +16,7 @@ from workers.video.identity import (
     uniform_descriptor,
     propose_tracklet_merges,
 )
+from workers.video.basketball_pass import BasketballPass
 from workers.video.highlights import build_highlights, render_highlights
 from workers.render.media import probe, render_clip, verify_clip, sha256
 
@@ -53,6 +55,45 @@ def process_video(source_path, output_dir, options, emit):
     )
     device = select_device(options.get("device"))
     emit("phase", {"phase": "track"})
+    source_hash = sha256(source_path)
+    ball = None
+    ball_report = None
+    ball_stride = options.get("ball_stride", 2)
+    ball_status = "disabled"
+    if options.get("basketball"):
+        emit("basketball.updated", dict(status="running", report=None))
+        try:
+            ball = BasketballPass(
+                metadata,
+                source_hash,
+                output_dir / "basketball",
+                device,
+                ball_stride,
+                emit,
+            )
+            ball_status = "running"
+            emit("basketball.updated", dict(status="running", report=ball.snapshot()))
+        except Exception as exc:
+            logging.exception("Ball/hoop initialization failed")
+            ball_status = "failed"
+            emit(
+                "basketball.updated",
+                dict(
+                    status="failed",
+                    report=None,
+                    error="Ball detector initialization failed: " + type(exc).__name__,
+                ),
+            )
+    elif options.get("basketball_unavailable"):
+        ball_status = "unavailable"
+        emit(
+            "basketball.updated",
+            dict(
+                status="unavailable",
+                report=None,
+                error=options["basketball_unavailable"],
+            ),
+        )
     model, model_load_seconds, model_cache_hit = get_model(device)
     # Reject low-score detections before the expensive pose head, not after it.
     # A single worker owns the cached model and sets this for every job.
@@ -67,22 +108,68 @@ def process_video(source_path, output_dir, options, emit):
     first_inference_seconds = None
     replay_start = time.perf_counter()
     index = 0
+    retrieved_frames = 0
+    last_timestamp = -1
     try:
         while True:
             ok = cap.grab()
             if not ok:
                 break
-            if index % stride:
+            pose_due = index % stride == 0
+            ball_due = (
+                ball is not None
+                and ball_status == "running"
+                and index % ball_stride == 0
+            )
+            if not (pose_due or ball_due):
                 index += 1
                 continue
             ok, frame = cap.retrieve()
             if not ok:
                 break
-            timestamp = round(index / metadata["fps"] * 1000)
+            retrieved_frames += 1
+            reported = round(cap.get(cv2.CAP_PROP_POS_MSEC))
+            timestamp = (
+                reported
+                if reported > last_timestamp
+                else round(index / metadata["fps"] * 1000)
+            )
+            if timestamp <= last_timestamp:
+                raise ValueError("Non-monotonic source timestamps")
+            last_timestamp = timestamp
             if options.get("replay_paced"):
                 time.sleep(
                     max(0, timestamp / 1000 - (time.perf_counter() - replay_start))
                 )
+            if ball_due:
+                try:
+                    ball.observe(frame, timestamp)
+                except Exception as exc:
+                    logging.exception(
+                        "Ball/hoop inference stopped; player tracking continues"
+                    )
+                    ball_status = "failed"
+                    ball.flush()
+                    emit(
+                        "basketball.updated",
+                        dict(
+                            status="failed",
+                            report=ball.snapshot(),
+                            error="Ball detector failed: " + type(exc).__name__,
+                        ),
+                    )
+            emit(
+                "analysis.progress",
+                dict(
+                    processed_frames=processed,
+                    source_frame=index,
+                    source_timestamp_ms=timestamp,
+                    basketball_processed_frames=ball.frames if ball else 0,
+                ),
+            )
+            if not pose_due:
+                index += 1
+                continue
             tensor = (
                 torch.from_numpy(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                 .permute(2, 0, 1)
@@ -203,6 +290,9 @@ def process_video(source_path, output_dir, options, emit):
         sample.update(fields)
         enriched[key] = fields
     emit("tracks.enriched", dict(assignments=enriched))
+    if ball is not None and ball_status == "running":
+        ball_report = ball.finish(samples, index)
+        ball_status = "succeeded"
     emit("phase", {"phase": "score"})
     bundle = build_highlights(
         samples, metadata["duration_ms"], metadata["fps"], stride, options["job_id"]
@@ -264,7 +354,11 @@ def process_video(source_path, output_dir, options, emit):
         emit("event.created", event)
     elapsed = time.perf_counter() - started
     report = dict(
-        source_sha256=sha256(source_path),
+        source_sha256=source_hash,
+        analysis_mode="shared_decoder",
+        retrieved_frames=retrieved_frames,
+        basketball_status=ball_status,
+        basketball=ball_report,
         metadata=metadata,
         requested_device=requested_device,
         device=device,

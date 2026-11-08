@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { api, ApiError } from './api';
-import type { Clip, Envelope, GameEvent, Job, TrackSample } from './types';
+import type { AnalysisProgress, Clip, Envelope, GameEvent, Job, TrackSample } from './types';
 
 export type StreamState = 'connecting' | 'live' | 'reconnecting' | 'closed';
 
 const TERMINAL = new Set(['succeeded', 'failed']);
 export const isTerminal = (job?: Job | null) => !!job && TERMINAL.has(job.status);
 
-type Progress = { processed_frames?: number; source_timestamp_ms: number };
+type Progress = AnalysisProgress;
 
 type RoomState = {
   jobs: Job[];
@@ -102,6 +102,13 @@ function reducer(state: RoomState, action: Action): RoomState {
       if (!env.job_id || env.job_id !== state.activeJobId) return { ...state, ignored: state.ignored + 1 };
       // Completed-job snapshots include reviewer corrections; historical raw batches must not undo them.
       if (state.loaded && isTerminal(state.jobs.find(j => j.job_id === state.activeJobId))) return { ...state, ignored: state.ignored + 1 };
+      if (env.kind === 'analysis.progress') {
+        const attempt = env.payload.attempt ?? state.attempt;
+        if (attempt < state.attempt) return { ...state, ignored: state.ignored + 1 };
+        const base = attempt > state.attempt ? clearedOutputs(state, state.activeJobId, attempt) : state;
+        if (base.progress && env.payload.source_timestamp_ms < base.progress.source_timestamp_ms) return base;
+        return { ...base, progress: { ...base.progress, ...env.payload } };
+      }
       if (env.kind === 'tracks.batch') {
         const attempt = env.payload.attempt ?? state.attempt;
         if (attempt < state.attempt) return { ...state, ignored: state.ignored + 1 };
@@ -110,7 +117,7 @@ function reducer(state: RoomState, action: Action): RoomState {
         for (const s of env.payload.items) tracks.set(sampleKey(s), s);
         const progress =
           !base.progress || env.payload.source_timestamp_ms >= base.progress.source_timestamp_ms
-            ? { processed_frames: env.payload.processed_frames, source_timestamp_ms: env.payload.source_timestamp_ms }
+            ? { ...base.progress, processed_frames: env.payload.processed_frames, source_timestamp_ms: env.payload.source_timestamp_ms }
             : base.progress;
         return { ...base, tracks, progress };
       }

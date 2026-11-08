@@ -1,5 +1,7 @@
 # Ball/hoop detection and shot-candidate prototype
 
+**Current app flow:** [unified analysis](UNIFIED_ANALYSIS.md) supersedes the separate-pass API/UI described below. Use Analyze Footage for both models; the separate POST now returns410.
+
 ## Scope and parallel ownership
 
 This branch adds an isolated, runnable video-analysis stage. It does not edit the existing pose pipeline, identity draft, backend or frontend. Claude's separate session `fccb9796` (`scoutfilm-tracking`) owns tracking/team improvements in `/Users/tim/Documents/GitHub/yc-naive-tracking`. Another interactive Claude session was active in the main checkout, so this implementation was developed in `/Users/tim/Documents/GitHub/yc-naive-ball` on `work/ball-hoop`.

@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 from workers.render.media import probe, sha256
-from workers.video.pipeline import process_video
+from workers.video.coordinated import run_analysis as process_video
 from workers.video.runtime import available_devices, select_device
 from backend.app.highlight_routes import router as highlight_router, public_highlights
 from backend.app.basketball_routes import router as basketball_router
@@ -138,6 +138,48 @@ def output_emitter(game_id, id, attempt):
                 dict(job_id=id, game_id=game_id, **payload),
             )
             update(game_id, id, kind, payload)
+        elif kind == "analysis.progress":
+            payload["attempt"] = attempt
+            update(game_id, id, kind, payload)
+        elif kind in ("basketball.updated", "basketball.batch"):
+            try:
+                current = get("basketball_job", id)
+            except HTTPException:
+                current = dict(
+                    run_id=id,
+                    game_id=game_id,
+                    parent_job_id=id,
+                    identity_revision=identity_revision(id),
+                    integrated=True,
+                    created_at=time.time(),
+                    source_sha256=game["source_sha256"],
+                    output_dir=str(DATA / "processed" / id / "basketball"),
+                    status="running",
+                    error=None,
+                    report=None,
+                )
+            if kind == "basketball.batch":
+                put(
+                    "basketball_batch",
+                    id + ":" + str(payload["processed_frames"]),
+                    dict(job_id=id, attempt=attempt, **payload),
+                )
+                report = current.get("report") or {}
+                report.update(
+                    processed_frames=payload["processed_frames"],
+                    frames_with_ball=payload["frames_with_ball"],
+                    analyzed_until_ms=payload["source_timestamp_ms"],
+                )
+                for timing in ("elapsed_seconds", "detector_seconds"):
+                    if timing in payload:
+                        report[timing] = payload[timing]
+                current["report"] = report
+            else:
+                current.update(payload)
+            put("basketball_job", id, current)
+            from backend.app.basketball_routes import public
+
+            update(game_id, id, "basketball.updated", public(current))
         elif kind == "tracks.enriched":
             put("track_metadata", id, dict(job_id=id, **payload))
             update(game_id, id, kind, payload)
@@ -187,13 +229,17 @@ def run_job(id):
             # Each retry replaces this job's materialized output; the append-only audit retains history.
             with connect() as db:
                 for row in db.execute(
-                    "SELECT kind,id,value FROM records WHERE kind IN ('batch','clip','event','highlights','track_metadata')"
+                    "SELECT kind,id,value FROM records WHERE kind IN ('batch','clip','event','highlights','track_metadata','basketball_batch')"
                 ).fetchall():
                     if json.loads(row["value"]).get("job_id") == id:
                         db.execute(
                             "DELETE FROM records WHERE kind=? AND id=?",
                             (row["kind"], row["id"]),
                         )
+            with connect() as db:
+                db.execute(
+                    "DELETE FROM records WHERE kind='basketball_job' AND id=?", (id,)
+                )
             set_job(id, artifacts=[])
             result = process_video(
                 game["path"],
@@ -210,6 +256,17 @@ def run_job(id):
             audit(game_id, id, "analysis_completed", "succeeded", attempt)
             return
         except Exception as exc:
+            for basketball in all_records("basketball_job"):
+                if (
+                    basketball.get("parent_job_id") == id
+                    and basketball.get("integrated")
+                    and basketball["status"] == "running"
+                ):
+                    basketball.update(
+                        status="failed",
+                        error="Coordinated analysis failed; re-run Analyze footage",
+                    )
+                    put("basketball_job", basketball["run_id"], basketball)
             for bundle in all_records("highlights"):
                 if bundle["job_id"] == id and bundle["status"] in ("queued", "running"):
                     bundle.update(
@@ -385,6 +442,8 @@ class Cut(BaseModel):
 
 
 class Analysis(BaseModel):
+    basketball: bool = True
+    ball_stride: int = Field(default=2, ge=1, le=5)
     device: Optional[str] = Field(default=None, min_length=1, max_length=20)
     candidate_ranges: list[Cut] = Field(default_factory=list, max_length=10)
     replay_paced: bool = False

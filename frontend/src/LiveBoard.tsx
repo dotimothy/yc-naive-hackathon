@@ -147,7 +147,7 @@ export function LiveBoard(props: {
         <Stat label="Provisional Groups" value={onScreen.size || '–'} hint={onScreen.size ? 'distinct player / track IDs' : 'awaiting tracks'} />
         <Stat label="Detections" value={tracks.size ? tracks.size.toLocaleString() : '–'} hint="pose samples received" />
         <Stat label="Clips" value={clips.length ? `${passed}/${clips.length}` : '–'} hint="passed QA / rendered" />
-        <Stat label="Inference FPS" value={report ? report.inference_fps.toFixed(1) : '–'} hint={report ? `${report.execution_mode ?? report.device ?? 'cpu'} · measured` : 'after first run'} />
+        <Stat label="Player Inference FPS" value={report ? report.inference_fps.toFixed(1) : '–'} hint={report ? `${report.execution_mode ?? report.device ?? 'cpu'} · measured` : 'after first run'} />
         <Stat label="Feed Delay" value={props.delay ? `${props.delay.median}` : '–'} unit={props.delay ? 'ms' : undefined} hint="median, server → browser" />
       </dl>
 

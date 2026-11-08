@@ -97,7 +97,7 @@ function App() {
               <CourtArt />
               <span className="empty-kicker">Tip-Off</span>
               <h2>No Game Selected</h2>
-              <p>Upload basketball footage you are authorized to use, or load the TrackID3x3 sample, then run analysis to see real model detections and pose.</p>
+              <p>Upload basketball footage you are authorized to use, or load the TrackID3x3 sample, then run one analysis to see player tracking, pose and ball/hoop observations.</p>
             </div>
           )}
         </main>
@@ -346,7 +346,7 @@ function JobPanel(props: {
   jobs: Job[];
   loaded: boolean;
   refreshing: boolean;
-  progress: { processed_frames?: number; source_timestamp_ms: number } | null;
+  progress: { processed_frames?: number; basketball_processed_frames?: number; source_timestamp_ms: number } | null;
   durationMs: number;
   sampleCount: number;
   trackCount: number;
@@ -366,7 +366,7 @@ function JobPanel(props: {
       {!loaded && !job ? (
         <p className="muted small">Loading job history…</p>
       ) : !job ? (
-        <p className="muted small">No analysis yet. Click <b>Analyze Footage</b> to run person detection, pose and tracking (stride 5, offline pass — not replay-paced).</p>
+        <p className="muted small">No analysis yet. Click <b>Analyze Footage</b> to run player detection, pose, tracking and the available ball/hoop detector in one coordinated video pass. Models sample at their own intervals; this is offline analysis.</p>
       ) : (
         <>
           <div className="job-line">
@@ -376,22 +376,23 @@ function JobPanel(props: {
           </div>
           {job.error && <div className={job.status === 'failed' ? 'alert error' : 'alert warn'}>{job.error}</div>}
           {!isTerminal(job) && (
-            <div className="progress" aria-label="Source position processed">
+            <div className="progress" aria-label="Shared source position processed">
               <div style={{ width: `${pct}%` }} />
-              <span>{progress ? `processed to ${formatMs(progress.source_timestamp_ms)} / ${formatMs(durationMs)}` : 'waiting for first frames…'}</span>
+              <span>{progress ? `shared source processed to ${formatMs(progress.source_timestamp_ms)} / ${formatMs(durationMs)}` : 'waiting for first frames…'}</span>
             </div>
           )}
           <dl className="metrics">
             <div><dt>Track samples received</dt><dd>{props.sampleCount}</dd></div>
             <div><dt>Temporary track IDs</dt><dd>{props.trackCount}</dd></div>
-            {progress?.processed_frames !== undefined && !report && <div><dt>Frames processed</dt><dd>{progress.processed_frames}</dd></div>}
+            {progress?.processed_frames !== undefined && !report && <div><dt>Player frames sampled</dt><dd>{progress.processed_frames}</dd></div>}
+            {progress?.basketball_processed_frames !== undefined && !report && <div><dt>Ball/hoop frames sampled</dt><dd>{progress.basketball_processed_frames}</dd></div>}
             {report && (
               <>
                 <div><dt>Inference device</dt><dd>{report.execution_mode ?? report.device ?? "cpu (legacy run)"}</dd></div>
                 <div><dt>Model load</dt><dd>{fmt(report.model_load_seconds ?? 0, 2)} s{report.model_cache_hit ? " · cached" : ""}</dd></div>
-                <div><dt>Inference FPS (measured)</dt><dd>{fmt(report.inference_fps, 2)}</dd></div>
-                <div><dt>Processed / decoded frames</dt><dd>{report.processed_frames}{report.decoded_frames !== undefined ? ` / ${report.decoded_frames}` : ''}</dd></div>
-                <div><dt>Stride</dt><dd>every {report.stride} frame{report.stride === 1 ? '' : 's'}</dd></div>
+                <div><dt>Player inference FPS (measured)</dt><dd>{fmt(report.inference_fps, 2)}</dd></div>
+                <div><dt>Player sampled / decoded frames</dt><dd>{report.processed_frames}{report.decoded_frames !== undefined ? ` / ${report.decoded_frames}` : ''}</dd></div>
+                <div><dt>Player sampling interval</dt><dd>every {report.stride} frame{report.stride === 1 ? '' : 's'}</dd></div>
                 <div><dt>Wall time</dt><dd>{fmt(report.elapsed_seconds, 1)} s</dd></div>
                 <div><dt>Realtime factor</dt><dd>{fmt(report.realtime_factor, 2)}×</dd></div>
                 <div><dt>Report track IDs</dt><dd>{report.track_ids}</dd></div>
@@ -402,7 +403,7 @@ function JobPanel(props: {
           {report?.model && (
             <p className="fineprint">
               Model <code>{report.model}</code>
-              {report.tracker ? <> · tracker <code>{report.tracker}</code></> : null}. Inference FPS covers model time only.
+              {report.tracker ? <> · tracker <code>{report.tracker}</code></> : null}. Player inference FPS covers player-model time only. Ball evidence reports its own cadence and timing; both share source timestamps.
             </p>
           )}
           <div className="delay">
