@@ -22,15 +22,6 @@ for (const tab of tabs) {
 for (const link of nav) link.addEventListener('click', event => {event.preventDefault();selectSection(link.dataset.section);history.replaceState(null, '', '#' + link.dataset.section);});
 window.addEventListener('hashchange', () => selectSection(location.hash.slice(1)));
 selectSection(location.hash.slice(1));
-const motion = document.getElementById('motion-toggle');
-function setMotion(paused) {
-  document.body.classList.toggle('motion-paused', paused);
-  document.body.classList.toggle('motion-enabled', !paused);
-  motion.textContent = paused ? 'Resume Motion' : 'Pause Motion';
-  motion.setAttribute('aria-pressed', String(paused));
-}
-setMotion(window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-motion.addEventListener('click', () => setMotion(!document.body.classList.contains('motion-paused')));
 const answers = [...document.querySelectorAll('[data-answer]')];
 const feedback = document.querySelector('.quiz-feedback');
 const reveal = document.querySelector('.quiz-reveal');

@@ -22,7 +22,7 @@ Nothing is published automatically by adding these files.
 
 The page embeds the completed two-minute demo at `#demo`, with native playback controls, a poster image, and a direct video link. `assets/playlattice-demo.mp4` is a compressed H.264/AAC web derivative of the current customer/Outreach cut. This is the one explicitly published video exception in `.gitignore`; source footage and other generated videos remain ignored. See `assets/DEMO.md` for provenance, checksums, and source credits.
 
-The page uses the app’s bundled Barlow fonts and broadcast theme. `page.js` handles accessible tabs, motion controls, and a clearly labeled quiz interaction example. Motion honors the system preference; the recorded GIF has a still-image fallback.
+The page uses the app’s bundled Barlow fonts and broadcast theme. `page.js` handles accessible tabs and a clearly labeled quiz interaction example. Motion honors the system preference; the recorded GIF has a still-image fallback.
 
 The dashboard GIF is the existing recorded app tour, not the new two-minute demo or the latest UI. Its underlying footage is TrackID3x3, CC BY 4.0. Attribution is visible on the page; capture and transformation details are in `docs/assets/README.md`. The decorative court is an inline SVG illustration, not model output.
 
