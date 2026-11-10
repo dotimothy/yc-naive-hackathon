@@ -149,4 +149,4 @@ The latest local verification passed 243 backend tests, 63 Naive integration tes
 - [Agent instructions](AGENTS.md) and [implementation plan](docs/PROTOTYPE_PLAN.md)
 - [Planning document](https://docs.google.com/document/d/1kEtq_jr14fybmyRyH_d0h5GALDyeX0YExyt-AdtnJrM/edit)
 
-The repository is private. Model, runtime and dataset terms are separate: Ultralytics YOLO26n-pose uses AGPL-3.0 or an Enterprise license; E-BARD model weights are labeled CC BY 4.0; RF-DETR code is Apache 2.0. See the pinned download manifests and linked model documentation for provenance.
+PlayLattice source code is licensed under the [GNU AGPL-3.0](LICENSE). Model, runtime and dataset terms are separate: Ultralytics YOLO26n-pose uses AGPL-3.0 or an Enterprise license; E-BARD model weights are labeled CC BY 4.0; RF-DETR code is Apache 2.0. See the pinned download manifests and linked model documentation for provenance.
